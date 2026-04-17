@@ -1,0 +1,41 @@
+{
+  "inputs": {
+    "profile": "strong",
+    "mode": "agentic",
+    "physical_workers": 2048,
+    "async_workers": 2048,
+    "stage_cpu_cap": 1,
+    "base_nodes": 100000000,
+    "base_files": 4096,
+    "base_nodes_per_worker": 128,
+    "node_chars": 900,
+    "chunks_per_file": 100000,
+    "dim": 128,
+    "embedder_backend": "local-hash",
+    "set5_sink_backend": "faiss"
+  },
+  "tuned": {
+    "profile": "strong",
+    "physical_workers": 2048,
+    "async_workers": 2048,
+    "stage_cpu_cap": 1,
+    "nodes": 100000000,
+    "files": 4096,
+    "chunks_per_file": 100000,
+    "load_workers": 1,
+    "transform_workers": 1,
+    "embed_workers": 1,
+    "upsert_workers": 1,
+    "upsert_shards": 1,
+    "upsert_timeout_ms": 2.0,
+    "embed_batch": 12288,
+    "upsert_batch": 24576,
+    "agentic_embed_batch": 12288,
+    "agentic_upsert_batch": 24576,
+    "coalesce_multiplier": 1,
+    "ray_num_cpus": 1,
+    "ray_upsert_workers": 1,
+    "ray_shards": 1,
+    "ray_object_store_memory_mb": 24576
+  }
+}

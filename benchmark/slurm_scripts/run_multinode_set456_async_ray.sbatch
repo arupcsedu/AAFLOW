@@ -2,7 +2,7 @@
 #SBATCH --job-name=ragbench-set456
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=37
 #SBATCH -A bii_dsc_community
 #SBATCH --partition=parallel     # change to your cluster's partition
 #SBATCH --mem=256G
@@ -19,16 +19,26 @@ CONDA_ENV="/scratch/djy8hg/env/drc_rag_bench_env"
 PYTHON_BIN="${PYTHON_BIN:-$CONDA_ENV/bin/python}"
 OUTDIR="${OUTDIR:-$PROJECT_ROOT/drc_rag/benchmark/slurm_runs_set456/${SLURM_JOB_ID}}"
 PROFILE="${PROFILE:-default}"
+AGENTIC_ORDER="${AGENTIC_ORDER:-}"
 
 # Dataset/workload knobs
-NODES="${NODES:-4096}"
-FILES="${FILES:-200}"
+NODES="${NODES:-16384}"
+FILES="${FILES:-1024}"
 NODE_CHARS="${NODE_CHARS:-900}"
 UPSERT_CAP="${UPSERT_CAP:--1}"
+DIM="${DIM:-128}"
+EMBEDDER_BACKEND="${EMBEDDER_BACKEND:-local-hash}"
+SET5_SINK_BACKEND="${SET5_SINK_BACKEND:-chroma}"
 SET5_EMBED_BATCH="${SET5_EMBED_BATCH:-64}"
 SET5_UPSERT_BATCH="${SET5_UPSERT_BATCH:-256}"
-REQUEST_OVERHEAD_MS="${REQUEST_OVERHEAD_MS:-120}"
-PER_ITEM_MS="${PER_ITEM_MS:-2.0}"
+SET5_LOAD_WORKERS="${SET5_LOAD_WORKERS:-0}"
+SET5_TRANSFORM_WORKERS="${SET5_TRANSFORM_WORKERS:-0}"
+SET5_EMBED_WORKERS="${SET5_EMBED_WORKERS:-0}"
+SET5_UPSERT_WORKERS="${SET5_UPSERT_WORKERS:-0}"
+SET5_UPSERT_TIMEOUT_MS="${SET5_UPSERT_TIMEOUT_MS:-0}"
+SET5_UPSERT_SHARDS="${SET5_UPSERT_SHARDS:-0}"
+REQUEST_OVERHEAD_MS="${REQUEST_OVERHEAD_MS:-180}"
+PER_ITEM_MS="${PER_ITEM_MS:-3.0}"
 BATCH_SCALE_BASELINE="${BATCH_SCALE_BASELINE:-64}"
 RAY_OBJECT_STORE_MB="${RAY_OBJECT_STORE_MB:-2048}"
 NO_SCALE_SET5_BATCHES="${NO_SCALE_SET5_BATCHES:-1}"
@@ -37,6 +47,7 @@ STRICT_STAGE_SCALING="${STRICT_STAGE_SCALING:-1}"
 RUN_RAY_SET6="${RUN_RAY_SET6:-1}"
 RUN_DASK_SET7="${RUN_DASK_SET7:-1}"
 RUN_BSP_SET8="${RUN_BSP_SET8:-1}"
+RUN_HIGRESS_SET9="${RUN_HIGRESS_SET9:-1}"
 
 # Comma-separated async-workers:ray-num-cpus pairs.
 # async-workers is passed once per run and shared by Set4/Set5/Set6/Set7/Set8.
@@ -52,7 +63,21 @@ WORKER_CPU_PAIRS="${WORKER_CPU_PAIRS:-4:4,8:8,12:12,16:16}"
 #   PROFILE=no_bsp_large WORKER_CPU_PAIRS='128:128,256:256,512:512' \
 #   sbatch -N 4 --cpus-per-task=512 --mem=0 \
 #     /project/bi_dsc_community/drc_rag/benchmark/run_multinode_set456_async_ray.sbatch
+#
+#   PROFILE=no_ray \
+#   sbatch /project/bi_dsc_community/drc_rag/benchmark/run_multinode_set456_async_ray.sbatch
+#   PROFILE=ray_only \
+#   sbatch /project/bi_dsc_community/drc_rag/benchmark/run_multinode_set456_async_ray.sbatch
 case "$PROFILE" in
+  no_ray)
+    RUN_RAY_SET6=0
+    ;;
+  ray_only)
+    RUN_RAY_SET6=1
+    RUN_DASK_SET7=0
+    RUN_BSP_SET8=0
+    RUN_HIGRESS_SET9=0
+    ;;
   bsp_large)
     RUN_RAY_SET6=0
     RUN_DASK_SET7=0
@@ -128,11 +153,11 @@ run_one() {
   mkdir -p "$run_dir"
 
   srun --cpu-bind=none --nodes=1 --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --exclusive --nodelist="$host" \
-    --export=ALL,PAIR="$pair",RUN_DIR="$run_dir",PROJECT_ROOT="$PROJECT_ROOT",BENCH_SCRIPT="$BENCH_SCRIPT",PYTHON_BIN="$PYTHON_BIN",NODES="$NODES",FILES="$FILES",NODE_CHARS="$NODE_CHARS",UPSERT_CAP="$UPSERT_CAP",SET5_EMBED_BATCH="$SET5_EMBED_BATCH",SET5_UPSERT_BATCH="$SET5_UPSERT_BATCH",REQUEST_OVERHEAD_MS="$REQUEST_OVERHEAD_MS",PER_ITEM_MS="$PER_ITEM_MS",BATCH_SCALE_BASELINE="$BATCH_SCALE_BASELINE",RAY_OBJECT_STORE_MB="$RAY_OBJECT_STORE_MB",NO_SCALE_SET5_BATCHES="$NO_SCALE_SET5_BATCHES",SET45_UPSERT_SHARDS="$SET45_UPSERT_SHARDS",STRICT_STAGE_SCALING="$STRICT_STAGE_SCALING",RUN_RAY_SET6="$RUN_RAY_SET6",RUN_DASK_SET7="$RUN_DASK_SET7",RUN_BSP_SET8="$RUN_BSP_SET8" \
+    --export=ALL,PAIR="$pair",RUN_DIR="$run_dir",PROJECT_ROOT="$PROJECT_ROOT",BENCH_SCRIPT="$BENCH_SCRIPT",PYTHON_BIN="$PYTHON_BIN",NODES="$NODES",FILES="$FILES",NODE_CHARS="$NODE_CHARS",UPSERT_CAP="$UPSERT_CAP",DIM="$DIM",EMBEDDER_BACKEND="$EMBEDDER_BACKEND",SINK_BACKEND="$SET5_SINK_BACKEND",SET5_SINK_BACKEND="$SET5_SINK_BACKEND",SET5_EMBED_BATCH="$SET5_EMBED_BATCH",SET5_UPSERT_BATCH="$SET5_UPSERT_BATCH",SET5_LOAD_WORKERS="$SET5_LOAD_WORKERS",SET5_TRANSFORM_WORKERS="$SET5_TRANSFORM_WORKERS",SET5_EMBED_WORKERS="$SET5_EMBED_WORKERS",SET5_UPSERT_WORKERS="$SET5_UPSERT_WORKERS",SET5_UPSERT_TIMEOUT_MS="$SET5_UPSERT_TIMEOUT_MS",SET5_UPSERT_SHARDS="$SET5_UPSERT_SHARDS",REQUEST_OVERHEAD_MS="$REQUEST_OVERHEAD_MS",PER_ITEM_MS="$PER_ITEM_MS",BATCH_SCALE_BASELINE="$BATCH_SCALE_BASELINE",RAY_OBJECT_STORE_MB="$RAY_OBJECT_STORE_MB",NO_SCALE_SET5_BATCHES="$NO_SCALE_SET5_BATCHES",SET45_UPSERT_SHARDS="$SET45_UPSERT_SHARDS",STRICT_STAGE_SCALING="$STRICT_STAGE_SCALING",RUN_RAY_SET6="$RUN_RAY_SET6",RUN_DASK_SET7="$RUN_DASK_SET7",RUN_BSP_SET8="$RUN_BSP_SET8",RUN_HIGRESS_SET9="$RUN_HIGRESS_SET9" \
     bash -lc '
       set -euo pipefail
       cd "$PROJECT_ROOT"
-      "$PYTHON_BIN" -c "import chromadb, ray, dask" >/dev/null
+      "$PYTHON_BIN" -c "import chromadb, ray, dask, faiss" >/dev/null
 
       aw="${PAIR%%:*}"
       rcpu="${PAIR##*:}"
@@ -150,10 +175,133 @@ run_one() {
       else
         set45_upsert_shards="${SET45_UPSERT_SHARDS}"
       fi
+      agentic_order="${AGENTIC_ORDER:-}"
+      if [[ -z "$agentic_order" ]]; then
+        if [[ "$SET5_SINK_BACKEND" == "faiss" ]]; then
+          agentic_order="last"
+        else
+          agentic_order="early"
+        fi
+      fi
+
+      if [[ "$SET5_SINK_BACKEND" == "faiss" ]]; then
+        if [[ "$SET5_LOAD_WORKERS" -gt 0 ]]; then
+          set5_load_workers="$SET5_LOAD_WORKERS"
+        else
+          case "$aw" in
+            4) set5_load_workers=8 ;;
+            *) set5_load_workers="$aw" ;;
+          esac
+        fi
+        if [[ "$SET5_TRANSFORM_WORKERS" -gt 0 ]]; then
+          set5_transform_workers="$SET5_TRANSFORM_WORKERS"
+        else
+          case "$aw" in
+            4) set5_transform_workers=8 ;;
+            *) set5_transform_workers="$aw" ;;
+          esac
+        fi
+        if [[ "$SET5_EMBED_WORKERS" -gt 0 ]]; then
+          set5_embed_workers="$SET5_EMBED_WORKERS"
+        else
+          case "$aw" in
+            4) set5_embed_workers=4 ;;
+            *) set5_embed_workers="$aw" ;;
+          esac
+        fi
+        if [[ "$SET5_UPSERT_WORKERS" -gt 0 ]]; then
+          set5_upsert_workers="$SET5_UPSERT_WORKERS"
+        else
+          set5_upsert_workers=1
+        fi
+        if [[ "$SET5_UPSERT_SHARDS" -gt 0 ]]; then
+          set5_upsert_shards="$SET5_UPSERT_SHARDS"
+        else
+          set5_upsert_shards=1
+        fi
+        if [[ "$SET5_UPSERT_TIMEOUT_MS" != "0" && "$SET5_UPSERT_TIMEOUT_MS" != "0.0" ]]; then
+          set5_upsert_timeout_ms="$SET5_UPSERT_TIMEOUT_MS"
+        else
+          set5_upsert_timeout_ms=2
+        fi
+        if [[ "$SET5_EMBED_BATCH" -lt 512 ]]; then
+          set5_embed_batch=512
+        else
+          set5_embed_batch="$SET5_EMBED_BATCH"
+        fi
+        case "$aw" in
+          4) set5_upsert_batch=2048 ;;
+          8) set5_upsert_batch=2048 ;;
+          12) set5_upsert_batch=3072 ;;
+          16) set5_upsert_batch=4096 ;;
+          *) set5_upsert_batch="$SET5_UPSERT_BATCH" ;;
+        esac
+      else
+
+      if [[ "$SET5_EMBED_WORKERS" -gt 0 ]]; then
+        set5_embed_workers="$SET5_EMBED_WORKERS"
+      else
+        case "$aw" in
+          4) set5_embed_workers=8 ;;
+          8) set5_embed_workers=12 ;;
+          12) set5_embed_workers=16 ;;
+          16) set5_embed_workers=16 ;;
+          *) set5_embed_workers="$aw" ;;
+        esac
+      fi
+      if [[ "$SET5_UPSERT_WORKERS" -gt 0 ]]; then
+        set5_upsert_workers="$SET5_UPSERT_WORKERS"
+      else
+        case "$aw" in
+          4) set5_upsert_workers=2 ;;
+          8) set5_upsert_workers=4 ;;
+          12) set5_upsert_workers=3 ;;
+          16) set5_upsert_workers=4 ;;
+          *) set5_upsert_workers=$(( aw / 4 )) ;;
+        esac
+        if [[ "$set5_upsert_workers" -lt 1 ]]; then set5_upsert_workers=1; fi
+      fi
+      if [[ "$set5_embed_workers" -gt "$max_step_cpus" ]]; then
+        set5_embed_workers="$max_step_cpus"
+      fi
+      if [[ "$set5_upsert_workers" -gt "$max_step_cpus" ]]; then
+        set5_upsert_workers="$max_step_cpus"
+      fi
+      if [[ "$SET5_UPSERT_SHARDS" -gt 0 ]]; then
+        set5_upsert_shards="$SET5_UPSERT_SHARDS"
+      else
+        case "$aw" in
+          4) set5_upsert_shards=16 ;;
+          8) set5_upsert_shards=16 ;;
+          12) set5_upsert_shards=24 ;;
+          16) set5_upsert_shards=32 ;;
+          *) set5_upsert_shards=$(( set5_upsert_workers * 8 )) ;;
+        esac
+      fi
+      if [[ "$SET5_UPSERT_TIMEOUT_MS" != "0" && "$SET5_UPSERT_TIMEOUT_MS" != "0.0" ]]; then
+        set5_upsert_timeout_ms="$SET5_UPSERT_TIMEOUT_MS"
+      else
+        case "$aw" in
+          4) set5_upsert_timeout_ms=2 ;;
+          8) set5_upsert_timeout_ms=4 ;;
+          12) set5_upsert_timeout_ms=2 ;;
+          16) set5_upsert_timeout_ms=2 ;;
+          *) set5_upsert_timeout_ms=2 ;;
+        esac
+      fi
+      set5_load_workers="${SET5_LOAD_WORKERS:-0}"
+      set5_transform_workers="${SET5_TRANSFORM_WORKERS:-0}"
+      set5_embed_batch="$SET5_EMBED_BATCH"
+      set5_upsert_batch="$SET5_UPSERT_BATCH"
+      fi
 
       out_file="$RUN_DIR/benchmark.out"
       time_file="$RUN_DIR/time.txt"
       extra_flags=()
+      mode_flag="--only-async"
+      if [[ "$PROFILE" == "ray_only" ]]; then
+        mode_flag="--only-ray"
+      fi
       if [[ "$NO_SCALE_SET5_BATCHES" -eq 1 ]]; then
         extra_flags+=(--no-scale-set5-batches)
       fi
@@ -169,19 +317,33 @@ run_one() {
       if [[ "$RUN_BSP_SET8" -eq 1 ]]; then
         extra_flags+=(--run-bsp-set8 --bsp-workers "$aw")
       fi
+      if [[ "$RUN_HIGRESS_SET9" -eq 1 ]]; then
+        extra_flags+=(--run-higress-set9 --higress-workers "$aw")
+      fi
 
       status=0
       /usr/bin/time -v \
         "$PYTHON_BIN" "$BENCH_SCRIPT" \
-          --only-async \
+          "$mode_flag" \
           --nodes "$NODES" \
           --files "$FILES" \
           --node-chars "$NODE_CHARS" \
+          --dim "$DIM" \
+          --embedder-backend "$EMBEDDER_BACKEND" \
+          --sink-backend "$SINK_BACKEND" \
+          --agentic-order "$agentic_order" \
           --async-workers "$aw" \
           --ray-num-cpus "$rcpu" \
           --upsert-workers-cap "$upsert_cap" \
-          --set5-embed-batch "$SET5_EMBED_BATCH" \
-          --set5-upsert-batch "$SET5_UPSERT_BATCH" \
+          --set5-sink-backend "$SET5_SINK_BACKEND" \
+          --set5-embed-batch "$set5_embed_batch" \
+          --set5-upsert-batch "$set5_upsert_batch" \
+          --set5-load-workers "$set5_load_workers" \
+          --set5-transform-workers "$set5_transform_workers" \
+          --set5-embed-workers "$set5_embed_workers" \
+          --set5-upsert-workers "$set5_upsert_workers" \
+          --set5-upsert-timeout-ms "$set5_upsert_timeout_ms" \
+          --set5-upsert-shards "$set5_upsert_shards" \
           --set45-upsert-shards "$set45_upsert_shards" \
           --request-overhead-ms "$REQUEST_OVERHEAD_MS" \
           --per-item-ms "$PER_ITEM_MS" \

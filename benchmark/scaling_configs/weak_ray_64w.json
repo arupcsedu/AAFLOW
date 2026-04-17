@@ -1,0 +1,41 @@
+{
+  "inputs": {
+    "profile": "weak",
+    "mode": "ray",
+    "physical_workers": 64,
+    "async_workers": 64,
+    "stage_cpu_cap": 80,
+    "base_nodes": 1000000,
+    "base_files": 256,
+    "base_nodes_per_worker": 24000,
+    "node_chars": 900,
+    "chunks_per_file": 1000,
+    "dim": 128,
+    "embedder_backend": "local-hash",
+    "set5_sink_backend": "faiss"
+  },
+  "tuned": {
+    "profile": "weak",
+    "physical_workers": 64,
+    "async_workers": 64,
+    "stage_cpu_cap": 80,
+    "nodes": 1536000,
+    "files": 1536,
+    "chunks_per_file": 1000,
+    "load_workers": 8,
+    "transform_workers": 8,
+    "embed_workers": 8,
+    "upsert_workers": 1,
+    "upsert_shards": 1,
+    "upsert_timeout_ms": 2.0,
+    "embed_batch": 512,
+    "upsert_batch": 2048,
+    "agentic_embed_batch": 1024,
+    "agentic_upsert_batch": 4096,
+    "coalesce_multiplier": 1,
+    "ray_num_cpus": 6,
+    "ray_upsert_workers": 1,
+    "ray_shards": 1,
+    "ray_object_store_memory_mb": 1024
+  }
+}

@@ -1,7 +1,7 @@
 # LlamaIndex Ingestion Benchmark
 
 Author: Arup Sarker, `djy8hg@virginia.edu`, `arupcsedu@gmail.com`  
-Updated for Sets 1 through 8
+Updated for Sets 1 through 9
 
 This benchmark compares multiple ingestion strategies over the same synthetic corpus and the same simulated embedding model. The main script is:
 
@@ -66,6 +66,13 @@ It reports:
 - Parallel upsert stage
 - Barrier between stages
 
+### Set 9: `HigressRAG`
+- Parallel file load
+- Direct delimiter chunking
+- Parallel embedding
+- Parallel batched upsert
+- Thin ingestion baseline for comparison against `AgenticDRC`
+
 
 ## Installation
 
@@ -110,11 +117,16 @@ python -c "import chromadb, ray, dask, llama_index; print('ok')"
 - `--ray-num-cpus`: Set 6 Ray CPU budget
 - `--dask-workers`: Set 7 worker count
 - `--bsp-workers`: Set 8 worker count
+- `--higress-workers`: Set 9 worker count
 
 ### Embedding and upsert behavior
 
 - `--set5-embed-batch`
 - `--set5-upsert-batch`
+- `--set5-embed-workers`
+- `--set5-upsert-workers`
+- `--set5-upsert-timeout-ms`
+- `--set5-upsert-shards`
 - `--batch-scale-baseline`
 - `--upsert-workers-cap`
 - `--set45-upsert-shards`
@@ -216,6 +228,42 @@ python /project/bi_dsc_community/drc_rag/benchmark/benchmark_configs_1_to_5.py \
   --set5-upsert-batch 16 \
   --no-scale-set5-batches
 ```
+
+### Run AsyncParallelOnly, AgenticDRC, Ray, Dask, and Higress with the best Set5 tuning
+
+Current best completed fair comparison for `AgenticDRC` vs `HigressRAG` uses:
+
+- `--set5-embed-workers 96`
+- `--set5-upsert-workers 8`
+- `--set5-upsert-timeout-ms 2`
+- `--set5-upsert-shards 64`
+
+This setting produced a best observed `AgenticDRC vs HigressRAG` improvement of `29.4% faster`.
+
+```bash
+python /project/bi_dsc_community/drc_rag/benchmark/benchmark_configs_1_to_5.py \
+  --only-async \
+  --run-ray-set6 \
+  --run-dask-set7 \
+  --run-higress-set9 \
+  --nodes 4096 \
+  --files 256 \
+  --node-chars 900 \
+  --async-workers 16 \
+  --ray-num-cpus 16 \
+  --dask-workers 16 \
+  --higress-workers 16 \
+  --set5-embed-batch 64 \
+  --set5-upsert-batch 256 \
+  --set5-embed-workers 96 \
+  --set5-upsert-workers 8 \
+  --set5-upsert-timeout-ms 2 \
+  --set5-upsert-shards 64
+```
+
+Note:
+- `Set5` now uses true shard count independent of upsert worker count.
+- `Set5` upsert workers are multiplexed across shard-ready batches instead of one-worker-per-shard binding.
 
 
 ## Scaling-Oriented Configurations
