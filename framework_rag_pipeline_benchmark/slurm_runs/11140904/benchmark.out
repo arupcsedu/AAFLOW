@@ -1,0 +1,7 @@
+LangChain  mode=distributed docs=   256 chunks=  200000 load=0.024s transform=0.006s gen=0.346s tok/s=94822.7 embed=1.149s upsert=0.140s total=1.645s
+LangGraph  mode=distributed docs=   256 chunks=  200000 load=0.018s transform=0.008s gen=0.350s tok/s=93711.6 embed=1.140s upsert=0.136s total=1.614s
+CrewAI     mode=distributed docs=   256 chunks=  200000 load=0.011s transform=0.010s gen=0.349s tok/s=93955.1 embed=1.145s upsert=0.133s total=1.625s
+AutoGen    mode=distributed docs=   256 chunks=  200000 load=0.013s transform=0.010s gen=0.346s tok/s=94579.2 embed=1.136s upsert=0.135s total=1.614s
+AgenticDRC mode=distributed docs=   256 chunks=  200000 load=0.011s transform=0.011s gen=0.339s tok/s=96555.7 embed=0.486s upsert=0.049s total=0.875s
+Wrote /project/bi_dsc_community/drc_rag/framework_rag_pipeline_benchmark/slurm_runs/11140904/summary.csv
+Wrote /project/bi_dsc_community/drc_rag/framework_rag_pipeline_benchmark/slurm_runs/11140904/summary.json
