@@ -1,0 +1,42 @@
+{
+  "inputs": {
+    "profile": "weak",
+    "mode": "agentic",
+    "physical_workers": 256,
+    "async_workers": 256,
+    "stage_cpu_cap": 1,
+    "base_nodes": 100000,
+    "base_files": 256,
+    "base_nodes_per_worker": 95000,
+    "node_chars": 900,
+    "chunks_per_file": 1000,
+    "dim": 128,
+    "embedder_backend": "local-hash",
+    "set5_sink_backend": "faiss"
+  },
+  "tuned": {
+    "profile": "weak",
+    "physical_workers": 256,
+    "async_workers": 256,
+    "stage_cpu_cap": 1,
+    "nodes": 24320000,
+    "files": 24320,
+    "chunks_per_file": 1000,
+    "load_workers": 1,
+    "transform_workers": 1,
+    "embed_workers": 1,
+    "upsert_workers": 1,
+    "upsert_shards": 1,
+    "upsert_timeout_ms": 2.0,
+    "embed_batch": 2048,
+    "upsert_batch": 8192,
+    "agentic_embed_batch": 2048,
+    "agentic_upsert_batch": 16384,
+    "coalesce_multiplier": 1,
+    "ray_num_cpus": 1,
+    "ray_upsert_workers": 1,
+    "ray_shards": 1,
+    "ray_object_store_memory_mb": 8192
+  },
+  "source_config_path": "/sfs/gpfs/tardis/project/bi_dsc_community/drc_rag/benchmark/scaling_configs/weak_agentic_256w.json"
+}

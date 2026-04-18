@@ -1,0 +1,22 @@
+{
+  "profile": "strong",
+  "physical_workers": 256,
+  "async_workers": 256,
+  "stage_cpu_cap": 1,
+  "nodes": 100000000,
+  "files": 1000,
+  "chunks_per_file": 100000,
+  "load_workers": 1,
+  "transform_workers": 1,
+  "embed_workers": 1,
+  "upsert_workers": 1,
+  "upsert_shards": 1,
+  "upsert_timeout_ms": 2.0,
+  "embed_batch": 2048,
+  "upsert_batch": 8192,
+  "coalesce_multiplier": 1,
+  "ray_num_cpus": 1,
+  "ray_upsert_workers": 1,
+  "ray_shards": 1,
+  "ray_object_store_memory_mb": 2048
+}

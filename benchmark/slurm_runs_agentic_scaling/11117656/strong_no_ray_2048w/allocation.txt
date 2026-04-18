@@ -1,0 +1,11 @@
+{
+  "physical_workers": 2048,
+  "world_size": 2048,
+  "profile": "strong",
+  "total_nodes": 100000000,
+  "total_files": 4096,
+  "sink_backend": "faiss",
+  "embedder_backend": "local-hash",
+  "shared_corpus_dir": "/scratch/djy8hg/aaflow_data/drc_rag_scaling_corpus_cache/nodes_100000000__files_4096__chars_900__seed_7",
+  "worker_config_path": "/project/bi_dsc_community/drc_rag/benchmark/slurm_runs_agentic_scaling/11117656/strong_no_ray_2048w/worker_config.json"
+}

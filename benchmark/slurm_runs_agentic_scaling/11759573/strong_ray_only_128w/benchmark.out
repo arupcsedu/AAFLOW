@@ -1,0 +1,7 @@
+
+Config             | Chunks   | Load(s) | Transform(s) | Embed(s) | Upsert(s) | Total(s) | Δ vs RayDataScalableRAG
+-------------------+----------+---------+--------------+----------+-----------+----------+------------------------
+RayDataScalableRAG | 10000000 | 57.636  | 0.032        | 22.914   | 3.151     | 84.136   | baseline               
+
+CorpusPrep(s) [excluded from benchmark stages]: 0.013
+

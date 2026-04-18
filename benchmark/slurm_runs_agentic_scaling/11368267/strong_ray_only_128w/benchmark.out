@@ -1,0 +1,5 @@
+
+Config             | Chunks   | Load(s) | Transform(s) | Embed(s) | Upsert(s) | Embed+Drain(s) | ConsumerDrain(s) | Total(s) | Δ vs RayDataScalableRAG
+-------------------+----------+---------+--------------+----------+-----------+----------------+------------------+----------+------------------------
+RayDataScalableRAG | 10000000 | 46.893  | 0.003        | 25.909   | 3.310     | 29.219         | 3.310            | 76.145   | baseline               
+

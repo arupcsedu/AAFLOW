@@ -1,0 +1,9 @@
+
+Config                     | Chunks   | Load(s) | Transform(s) | Embed(s) | Upsert(s) | Total(s) | Δ vs AsyncParallelOnly
+---------------------------+----------+---------+--------------+----------+-----------+----------+-----------------------
+AsyncParallelOnly          | 24320000 | 4.321   | 4.236        | 10.883   | 1.341     | 18.699   | baseline              
+DaskScalableRAG            | 24320000 | 8.452   | 2.479        | 7.052    | 16.398    | 24.627   | -31.7% faster         
+BulkSynchronousParallelRAG | 24320000 | 2.290   | 1.205        | 2.210    | 0.575     | 5.344    | 71.4% faster          
+HigressRAG                 | 24320000 | 2.616   | 1.003        | 2.407    | 1.355     | 5.288    | 71.7% faster          
+AgenticDRC                 | 24320000 | 2.882   | 0.617        | 0.415    | 0.096     | 3.150    | 83.2% faster          
+
