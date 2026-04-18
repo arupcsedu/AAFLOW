@@ -39,7 +39,7 @@ It reports:
 - Async embedding concurrency only
 - Upsert batch size fixed at `1`
 
-### Set 5: `AgenticDRC`
+### Set 5: `AgenticDRC(AAFLOW)`
 - Sync load
 - Async transform pipeline
 - Async embedding with batching
@@ -229,7 +229,7 @@ python /project/bi_dsc_community/drc_rag/benchmark/benchmark_configs_1_to_5.py \
   --no-scale-set5-batches
 ```
 
-### Run AsyncParallelOnly, AgenticDRC, Ray, Dask, and Higress with the best Set5 tuning
+### Run AsyncParallelOnly, AgenticDRC(AAFLOW), Ray, Dask, and Higress with the best Set5 tuning
 
 Current best completed fair comparison for `AgenticDRC` vs `HigressRAG` uses:
 
@@ -238,7 +238,7 @@ Current best completed fair comparison for `AgenticDRC` vs `HigressRAG` uses:
 - `--set5-upsert-timeout-ms 2`
 - `--set5-upsert-shards 64`
 
-This setting produced a best observed `AgenticDRC vs HigressRAG` improvement of `29.4% faster`.
+This setting produced a best observed `AgenticDRC(AAFLOW) vs HigressRAG` improvement of `29.4% faster`.
 
 ```bash
 python /project/bi_dsc_community/drc_rag/benchmark/benchmark_configs_1_to_5.py \

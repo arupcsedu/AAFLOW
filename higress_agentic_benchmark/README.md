@@ -1,6 +1,6 @@
 # Higress vs Agentic RAG Benchmark
 
-This directory contains a standalone benchmark that compares `HigressRAG` and `AgenticRAG` on local corpora.
+This directory contains a standalone benchmark that compares `HigressRAG` and `AgenticRAG(AAFLOW)` on local corpora.
 
 ## Current Implementation
 
@@ -28,7 +28,7 @@ The current validated path is:
 The current FAISS overlap benchmark is overlap-oriented, not neutral.
 
 It does two things deliberately:
-- `AgenticRAG` uses the thinner overlap path
+- `AgenticRAG(AAFLOW)` uses the thinner overlap path
 - `HigressRAG` pays modeled non-Agentic dispatch overhead in `fair_parallelism_plus_overlap`
 
 This is intentional. The benchmark is designed to measure whether an agentic overlap-oriented path can materially outperform a thinner serial RAG path under FAISS.
@@ -105,9 +105,9 @@ Validated output:
 - `drc_rag/higress_agentic_benchmark/test_outputs_faiss_overlap_local_sanity3`
 
 Observed local sanity result:
-- `AgenticRAG llm_generation total_ms_avg = 36.66`
+- `AgenticRAG(AAFLOW) llm_generation total_ms_avg = 36.66`
 - `HigressRAG llm_generation total_ms_avg = 76.88`
-- `AgenticRAG` is about `52.3%` faster on that scenario
+- `AgenticRAG(AAFLOW)` is about `52.3%` faster on that scenario
 
 ## Distributed Slurm Usage
 
@@ -177,7 +177,7 @@ Median results from `summary.csv`:
 | `HigressRAG` | `retrieval_hybrid` | `20.30` |
 
 Interpretation:
-- `AgenticRAG` exceeds the `30%` target under the current FAISS overlap benchmark semantics
+- `AgenticRAG(AAFLOW)` exceeds the `30%` target under the current FAISS overlap benchmark semantics
 - on `llm_generation`, `AgenticRAG` is about `59.8%` faster than `HigressRAG`
 - on `non_cached_complex_query`, `AgenticRAG` is about `58.5%` faster than `HigressRAG`
 
