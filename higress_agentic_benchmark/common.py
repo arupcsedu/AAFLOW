@@ -143,11 +143,37 @@ class DenseRetriever:
         return {idx: float(score) for idx, score in enumerate(sims)}
 
 
+class FaissDenseRetriever:
+    def __init__(self, chunks: Sequence[CorpusChunk], embeddings: np.ndarray):
+        import faiss
+
+        self.chunks = list(chunks)
+        self.embeddings = embeddings.astype(np.float32)
+        dim = int(self.embeddings.shape[1]) if self.embeddings.ndim == 2 else 0
+        self.index = faiss.IndexFlatIP(dim)
+        if len(self.embeddings):
+            self.index.add(self.embeddings)
+
+    def score_query_embedding(self, query_embedding: np.ndarray) -> Dict[int, float]:
+        if not self.chunks:
+            return {}
+        if query_embedding.ndim == 2:
+            query_embedding = query_embedding[0]
+        query = query_embedding.astype(np.float32).reshape(1, -1)
+        scores, ids = self.index.search(query, len(self.chunks))
+        return {
+            int(idx): float(score)
+            for idx, score in zip(ids[0].tolist(), scores[0].tolist())
+            if idx >= 0
+        }
+
+
 class HybridRetriever:
     def __init__(
         self,
         chunks: Sequence[CorpusChunk],
         embedder: HashingEmbedder,
+        vector_backend: str = "hash",
         dense_weight: float = 0.65,
         lexical_weight: float = 0.35,
     ):
@@ -155,7 +181,10 @@ class HybridRetriever:
         self.embedder = embedder
         texts = [chunk.text for chunk in self.chunks]
         self.chunk_embeddings = embedder.embed_texts(texts)
-        self.dense = DenseRetriever(self.chunks, self.chunk_embeddings)
+        if vector_backend == "faiss":
+            self.dense = FaissDenseRetriever(self.chunks, self.chunk_embeddings)
+        else:
+            self.dense = DenseRetriever(self.chunks, self.chunk_embeddings)
         self.lexical = BM25Retriever(self.chunks)
         self.dense_weight = dense_weight
         self.lexical_weight = lexical_weight
@@ -402,8 +431,20 @@ def write_summary_json(path: Path, query_rows: Sequence[QueryMetrics], summary_r
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def build_corpus(input_path: str, max_chars: int, overlap_chars: int, file_glob: str = "*") -> List[CorpusChunk]:
-    raw_pairs = load_raw_documents(input_path=input_path, file_glob=file_glob, rank=0, world_size=1)
+def build_corpus(
+    input_path: str,
+    max_chars: int,
+    overlap_chars: int,
+    file_glob: str = "*",
+    rank: int = 0,
+    world_size: int = 1,
+) -> List[CorpusChunk]:
+    raw_pairs = load_raw_documents(
+        input_path=input_path,
+        file_glob=file_glob,
+        rank=rank,
+        world_size=world_size,
+    )
     chunks: List[CorpusChunk] = []
     for doc_idx, (text, metadata) in enumerate(raw_pairs):
         cleaned = clean_text(text)

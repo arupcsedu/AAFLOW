@@ -15,6 +15,12 @@ from .engines import AgenticRAGEngine, EngineConfig, HigressRAGEngine, build_llm
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Benchmark Higress-style RAG vs Agentic RAG")
+    p.add_argument("--benchmark-mode", choices=["default", "fair_parallelism", "fair_parallelism_plus_overlap"], default="default")
+    p.add_argument("--vector-backend", choices=["hash", "faiss"], default="hash")
+    p.add_argument("--physical-workers", type=int, default=0)
+    p.add_argument("--non-agentic-dispatch-overhead-ms", type=float, default=0.0)
+    p.add_argument("--engine-filter", type=str, default="")
+    p.add_argument("--repeat", type=int, default=1)
     p.add_argument("--data-dir", type=str, default=str(Path(__file__).resolve().parents[1] / "data"))
     p.add_argument("--file-glob", type=str, default="*")
     p.add_argument("--max-chars", type=int, default=900)
@@ -24,8 +30,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--semantic-cache-threshold", type=float, default=0.92)
     p.add_argument("--dense-weight", type=float, default=0.65)
     p.add_argument("--lexical-weight", type=float, default=0.35)
-    p.add_argument("--llm-backend", choices=["mock", "hf", "tiny-local"], default="mock")
-    p.add_argument("--hf-model", type=str, default="sshleifer/tiny-gpt2")
+    p.add_argument("--llm-backend", choices=["mock", "hf", "tiny-local"], default="hf")
+    p.add_argument("--hf-model", type=str, default="distilgpt2")
     p.add_argument("--hf-device", type=str, default="cpu")
     p.add_argument("--hf-local-files-only", action="store_true")
     p.add_argument("--hf-max-new-tokens", type=int, default=64)
@@ -52,6 +58,10 @@ def main() -> None:
     query_sets = generate_query_cases(chunks, count=args.query_count)
 
     config = EngineConfig(
+        benchmark_mode=args.benchmark_mode,
+        physical_workers=args.physical_workers,
+        vector_backend=args.vector_backend,
+        non_agentic_dispatch_overhead_ms=args.non_agentic_dispatch_overhead_ms,
         top_k=args.top_k,
         semantic_cache_threshold=args.semantic_cache_threshold,
         dense_weight=args.dense_weight,
@@ -82,19 +92,27 @@ def main() -> None:
         args.mock_ms_per_token,
     )
 
-    higress = HigressRAGEngine(name="HigressRAG", chunks=chunks, llm=higress_llm, config=config)
-    agentic = AgenticRAGEngine(chunks=chunks, llm=agentic_llm, config=config)
+    engines = [
+        HigressRAGEngine(name="HigressRAG", chunks=chunks, llm=higress_llm, config=config),
+        AgenticRAGEngine(chunks=chunks, llm=agentic_llm, config=config),
+    ]
+    wanted = {item.strip() for item in args.engine_filter.split(",") if item.strip()}
+    if wanted:
+        engines = [engine for engine in engines if engine.name in wanted]
 
     # Warm semantic cache using the same semantic-cache scenario queries.
     warm_cases = query_sets["semantic_cache_lookup"]
-    higress.warm_cache(warm_cases)
-    agentic.warm_cache(warm_cases)
+    for engine in engines:
+        engine.warm_cache(warm_cases)
 
     query_rows = []
-    for scenario, cases in query_sets.items():
-        for case in cases:
-            query_rows.append(higress.run_query(scenario, case))
-            query_rows.append(agentic.run_query(scenario, case))
+    for repeat_index in range(max(1, args.repeat)):
+        for scenario, cases in query_sets.items():
+            for case in cases:
+                for engine in engines:
+                    row = engine.run_query(scenario, case)
+                    setattr(row, "repeat_index", repeat_index)
+                    query_rows.append(row)
 
     summaries = summarize_metrics(query_rows)
 
