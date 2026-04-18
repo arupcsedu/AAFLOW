@@ -1,91 +1,197 @@
-# CyMEM
-Agentic DRC transforms fragile, slow AI agents into robust, enterprise-grade systems. By replacing inefficient data pipelines with a high-speed, zero-copy architecture, it unifies data processing and agent orchestration to double end-to-end performance and ensure reliable, scalable execution.
+# Agentic DRC(AAFLOW) : Scalable Patterns for Agentic AI Workflows
 
-## Benchmark
-The main scaling benchmark lives under `drc_rag/benchmark/`.
+Agentic DRC(AAFLOW) is a unified distributed runtime for evaluating agentic retrieval pipelines under strong scaling, weak scaling, framework-level orchestration, and Higress-vs-Agentic comparisons.
 
-Key files:
+This repository is organized around three main questions:
+
+- How fast is the core Agentic DRC(AAFLOW) ingestion path compared with alternative implementations?
+- How does a distributed Ray-based pipeline compare with the no-Ray path under the same synthetic workload?
+- How does Agentic DRC(AAFLOW) compare with other framework orchestration layers and with Higress-style retrieval pipelines?
+
+## Design And Architecture
+
+Agentic DRC(AAFLOW) is built around a staged ingestion and retrieval model:
+
+1. `Load`
+2. `Transform`
+3. `Embed`
+4. `Upsert`
+
+These stages are benchmarked independently and in aggregate.
+
+### Core Design
+
+- Synthetic corpora are generated deterministically so different backends see the same workload.
+- The no-Ray path emphasizes a thin, batched, local execution model.
+- The Ray path uses `ray.data` for distributed source processing and a FAISS sink for ingestion benchmarking.
+- Framework and Higress benchmarks isolate orchestration effects from model quality.
+
+### Main Subsystems
+
+- `drc_rag/benchmark/`
+  - Strong/weak scaling benchmarks for Agentic DRC, Ray-only, and no-Ray paths.
+- `drc_rag/framework_rag_pipeline_benchmark/`
+  - Framework-level benchmark for `AgenticDRC`, `LangChain`, `LangGraph`, `CrewAI`, and `AutoGen`.
+- `drc_rag/higress_agentic_benchmark/`
+  - HigressRAG vs AgenticRAG comparison benchmark.
+
+### Important Benchmark Semantics
+
+- `raw`
+  - Runtime transform and runtime embed are included.
+- `prechunked`
+  - Runtime chunk splitting is removed, runtime embed is still included.
+- `preembedded`
+  - Runtime transform and runtime embed are removed from the timed path.
+  - This is an engineering throughput mode, not the headline semantic benchmark.
+
+For semantic comparisons, use `raw`.
+
+## Repository Layout
+
 - `drc_rag/benchmark/benchmark_configs_1_to_5.py`
+  - Main ingestion benchmark implementation.
 - `drc_rag/benchmark/agentic_scaling_runner.py`
+  - Scaling config launcher.
 - `drc_rag/benchmark/distributed_agentic_scaling.py`
+  - Distributed no-Ray aggregation path.
 - `drc_rag/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch`
+  - Main Slurm launcher for strong/weak scaling.
+- `drc_rag/framework_rag_pipeline_benchmark/run_framework_pipeline.slurm`
+  - Framework benchmark Slurm launcher.
+- `drc_rag/higress_agentic_benchmark/run_higress_benchmark.slurm`
+  - Higress benchmark Slurm launcher.
 
-### Current Ray Configuration
-Current validated Ray setup for strong scaling:
+## Installation
+
+### Recommended Environment
+
+Use the existing benchmark environment:
+
+```bash
+module load miniforge/24.3.0-py3.11
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate /scratch/djy8hg/env/drc_rag_bench_env
+cd /project/bi_dsc_community/drc_rag
+```
+
+Recommended Python:
+
+```bash
+/scratch/djy8hg/env/drc_rag_bench_env/bin/python
+```
+
+### Optional Package Installation
+
+If you need to rebuild the environment:
+
+```bash
+/scratch/djy8hg/env/drc_rag_bench_env/bin/pip install \
+  llama-index chromadb "ray[data]" "dask[distributed]" matplotlib \
+  langchain-core langgraph crewai autogen transformers torch faiss-cpu
+```
+
+### Basic Verification
+
+```bash
+/scratch/djy8hg/env/drc_rag_bench_env/bin/python - <<'PY'
+import chromadb, ray, dask
+print("environment ok")
+PY
+```
+
+## Main Experiments
+
+### 1. Scaling Benchmark
+
+Directory:
+
+- `drc_rag/benchmark/`
+
+Profiles:
+
+- `strong_ray_only`
+- `weak_ray_only`
+- `strong_no_ray`
+- `weak_no_ray`
+
+Current semantic headline Ray result:
+
+- job: `11368267`
 - profile: `strong_ray_only`
 - workers: `128`
-- nodes: `4`
-- cores per node: `40`
-- chunks: `10,000,000`
-- files: `4096`
-- embedder: `local-hash`
-- sink: `faiss`
-
-Current supported Ray input formats:
-- `raw`: read raw `.txt` files and split on `DELIM`
-- `prechunked`: read one chunk per line from cached `.txt` files
-- `preembedded`: read cached `.npz` shards with `ids` and `embeddings`
-
-### Best Current Ray Result
-Best current semantic Ray result for `strong_ray_only / 128w / 10M` with runtime transform and runtime embedding preserved:
-- job: `11368267`
 - input format: `raw`
 - total: `76.145s`
 
-Stage split:
-- `Load = 46.893s`
-- `Transform = 0.003s`
-- `Embed = 25.909s`
-- `Upsert = 3.310s`
+Reference:
 
-Reference output:
 - `drc_rag/benchmark/slurm_runs_agentic_scaling/11368267/strong_ray_only_128w/benchmark.out`
 
-Best prechunked Ray result:
-- job: `11391379`
-- input format: `prechunked`
-- total: `75.878s`
+Current aggressive engineering Ray result:
 
-Reference output:
-- `drc_rag/benchmark/slurm_runs_agentic_scaling/11391379/strong_ray_only_128w/benchmark.out`
-
-Aggressive engineering result, not the headline semantic benchmark:
 - job: `11392420`
+- profile: `strong_ray_only`
 - input format: `preembedded`
-- local corpus staging: enabled
+- local staging enabled
 - total: `43.746s`
 
-Stage split:
-- `Load = 38.411s`
-- `Transform = 0.000s`
-- `Embed = 0.000s`
-- `Upsert = 4.509s`
+Reference:
 
-Reference output:
 - `drc_rag/benchmark/slurm_runs_agentic_scaling/11392420/strong_ray_only_128w/benchmark.out`
 
-### Timing Semantics
-Benchmark table columns:
-- `Load`
-- `Transform`
-- `Embed`
-- `Upsert`
-- `Total`
+Current best no-Ray jobs at common worker counts:
 
-Important timing rules:
-- shared corpus preparation is excluded from benchmark stage timings
-- if a run has to build a cached corpus first, prep time is reported separately as:
-  - `CorpusPrep(s) [excluded from benchmark stages]: ...`
-- local corpus staging is intended to be outside the benchmark timing as well
+- `strong_no_ray_128w`: `11142392`
+- `strong_no_ray_256w`: `11101202`
+- `strong_no_ray_512w`: `11114125`
+- `strong_no_ray_1024w`: `11101380`
+- `weak_no_ray_128w`: `11149754`
+- `weak_no_ray_256w`: `11115360`
+- `weak_no_ray_512w`: `11116446`
+- `weak_no_ray_1024w`: `11116450`
 
-### Run Commands
-Profiles:
-- `strong_ray_only`: Ray-only strong-scaling benchmark
-- `weak_ray_only`: Ray-only weak-scaling benchmark
-- `strong_no_ray`: distributed no-Ray benchmark
-- `weak_no_ray`: distributed no-Ray benchmark
+### 2. Framework Pipeline Benchmark
 
-Submit the current semantic raw-text Ray path:
+Directory:
+
+- `drc_rag/framework_rag_pipeline_benchmark/`
+
+Current validated FAISS overlap run:
+
+- job: `11140904`
+
+Latest confirmation rerun:
+
+- job: `11787868`
+
+Reference:
+
+- `drc_rag/framework_rag_pipeline_benchmark/slurm_runs/11140904/`
+- `drc_rag/framework_rag_pipeline_benchmark/slurm_runs/11787868/`
+
+### 3. Higress vs Agentic Benchmark
+
+Directory:
+
+- `drc_rag/higress_agentic_benchmark/`
+
+Current validated distributed run:
+
+- job: `11788136`
+
+Previous validated reference:
+
+- job: `11141981`
+
+Reference:
+
+- `drc_rag/higress_agentic_benchmark/slurm_runs/11788136/`
+
+## How To Run
+
+### Scaling: Semantic Ray Run
+
+This is the semantic headline path. It preserves runtime transform and runtime embed.
 
 ```bash
 sbatch --nodes=4 --ntasks-per-node=40 \
@@ -93,17 +199,7 @@ sbatch --nodes=4 --ntasks-per-node=40 \
   /project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch
 ```
 
-Fresh rerun of the `11368267` semantic configuration:
-- job: `11759573`
-- config:
-  - `PROFILE=strong_ray_only`
-  - `PHYSICAL_WORKERS=128`
-  - `BASE_NODES=10000000`
-  - `BASE_FILES=4096`
-  - `CHUNKS_PER_FILE=100000`
-  - `RAY_INPUT_FORMAT=raw`
-
-Submit the current semantic prechunked Ray path:
+### Scaling: Ray Prechunked Run
 
 ```bash
 sbatch --nodes=4 --ntasks-per-node=40 \
@@ -111,7 +207,9 @@ sbatch --nodes=4 --ntasks-per-node=40 \
   /project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch
 ```
 
-Submit the aggressive engineering path:
+### Scaling: Aggressive Engineering Ray Run
+
+This is not the semantic headline result.
 
 ```bash
 sbatch --nodes=4 --ntasks-per-node=40 \
@@ -119,7 +217,7 @@ sbatch --nodes=4 --ntasks-per-node=40 \
   /project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch
 ```
 
-Submit the no-Ray strong-scaling path:
+### Scaling: No-Ray Strong Run
 
 ```bash
 sbatch --nodes=4 --ntasks-per-node=40 \
@@ -127,7 +225,7 @@ sbatch --nodes=4 --ntasks-per-node=40 \
   /project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch
 ```
 
-Submit the no-Ray weak-scaling path:
+### Scaling: No-Ray Weak Run
 
 ```bash
 sbatch --nodes=4 --ntasks-per-node=40 \
@@ -135,15 +233,132 @@ sbatch --nodes=4 --ntasks-per-node=40 \
   /project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch
 ```
 
+### Framework Benchmark
+
+Validated FAISS overlap configuration:
+
+```bash
+cd /project/bi_dsc_community/drc_rag/framework_rag_pipeline_benchmark
+sbatch -p parallel --nodes=2 \
+  --export=ALL,PHYSICAL_WORKERS=64,CORES_PER_NODE=40,VECTOR_BACKEND=faiss,NODES=200000,FILES=256,GENERATION_SAMPLES=8 \
+  run_framework_pipeline.slurm
+```
+
+### Higress Benchmark
+
+Validated Higress vs Agentic configuration:
+
+```bash
+cd /project/bi_dsc_community/drc_rag/higress_agentic_benchmark
+PHYSICAL_WORKERS=64 \
+CORES_PER_NODE=40 \
+DATA_DIR=/project/bi_dsc_community/drc_rag/higress_agentic_benchmark/sample_wikitext2_2000 \
+QUERY_COUNT=32 \
+REPEAT=5 \
+VECTOR_BACKEND=faiss \
+BENCHMARK_MODE=fair_parallelism_plus_overlap \
+LLM_BACKEND=mock \
+sbatch -A bii_dsc_community --partition=parallel --nodes=2 run_higress_benchmark.slurm
+```
+
+## Output Results
+
+### Scaling Benchmark Outputs
+
+Typical output directory:
+
+- `drc_rag/benchmark/slurm_runs_agentic_scaling/<job_id>/`
+
+Key files:
+
+- `benchmark.out`
+- `time.txt`
+- `allocation.txt`
+- `summary.csv`
+- `summary.json`
+
+Timing columns:
+
+- `Load`
+- `Transform`
+- `Embed`
+- `Upsert`
+- `Total`
+
+Notes:
+
+- corpus preparation is excluded from benchmark stage timings
+- local staging is intended to stay outside the timed benchmark path
+
+### Framework Benchmark Outputs
+
+Typical output directory:
+
+- `drc_rag/framework_rag_pipeline_benchmark/slurm_runs/<job_id>/`
+
+Key files:
+
+- `benchmark.out`
+- `summary.csv`
+- `full_summary.csv`
+- `summary.json`
+- `plots/`
+
+### Higress Benchmark Outputs
+
+Typical output directory:
+
+- `drc_rag/higress_agentic_benchmark/slurm_runs/<job_id>/`
+
+Key files:
+
+- `benchmark.out`
+- `summary.csv`
+- `full_summary.csv`
+- `summary.json`
+- `time.txt`
+
+## Result References
+
+### Scaling
+
+- Semantic Ray headline:
+  - `drc_rag/benchmark/slurm_runs_agentic_scaling/11368267/strong_ray_only_128w/benchmark.out`
+- Aggressive engineering Ray:
+  - `drc_rag/benchmark/slurm_runs_agentic_scaling/11392420/strong_ray_only_128w/benchmark.out`
+
+### Framework
+
+- Validated FAISS overlap:
+  - `drc_rag/framework_rag_pipeline_benchmark/slurm_runs/11140904/summary.csv`
+- Confirmation rerun:
+  - `drc_rag/framework_rag_pipeline_benchmark/slurm_runs/11787868/summary.csv`
+
+### Higress
+
+- Current validated run:
+  - `drc_rag/higress_agentic_benchmark/slurm_runs/11788136/summary.csv`
+- Previous validated run:
+  - `drc_rag/higress_agentic_benchmark/slurm_runs/11141981/summary.csv`
+
+## Operational Notes
+
+- Use `raw` when transform and embed must remain part of the benchmark semantics.
+- Use `prechunked` only when runtime chunk splitting can be excluded.
+- Do not use `preembedded` as the semantic headline benchmark.
+- For Ray experiments, the main remaining bottleneck in semantic runs is `Load`.
+- For Higress distributed runs, the validated path uses `LLM_BACKEND=mock`; using `hf` changes startup cost materially.
+
+## Quick Checks
+
 Check a job:
 
 ```bash
 squeue -j <job_id>
 ```
 
-### Notes
-- use `raw` when transform and embed must remain part of the benchmark semantics
-- `prechunked` removes runtime chunk splitting but keeps runtime embedding
-- `preembedded` removes both runtime chunking and runtime embedding from the timed Ray path, so it should be treated as an aggressive engineering mode rather than the headline semantic benchmark
-- first-time `prechunked` and `preembedded` runs can spend substantial excluded time building the shared cache.
-- `local-hash` is a synthetic local embedder used for ingestion/scaling measurement, not a real model-serving benchmark.
+Inspect accounting:
+
+```bash
+sacct -j <job_id> --format=JobID,JobName,State,Elapsed
+```
