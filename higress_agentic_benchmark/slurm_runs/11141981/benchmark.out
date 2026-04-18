@@ -1,0 +1,11 @@
+Local chunks per rank vary; rank0 chunks=430
+AgenticRAG llm_generation           count=2048 cache_hit_rate=0.00 total_ms_avg=28.12 retrieval_ms_avg=1.48 memory_load_ms_avg=0.02 memory_store_ms_avg=0.02 llm_ms_avg=26.53
+AgenticRAG non_cached_complex_query count=2048 cache_hit_rate=0.00 total_ms_avg=30.18 retrieval_ms_avg=2.08 memory_load_ms_avg=0.02 memory_store_ms_avg=0.02 llm_ms_avg=27.97
+AgenticRAG retrieval_hybrid         count=2048 cache_hit_rate=0.00 total_ms_avg=1.33 retrieval_ms_avg=1.26 memory_load_ms_avg=0.02 memory_store_ms_avg=0.01 llm_ms_avg=0.00
+AgenticRAG semantic_cache_lookup    count=2048 cache_hit_rate=1.00 total_ms_avg=0.03 retrieval_ms_avg=0.00 memory_load_ms_avg=0.00 memory_store_ms_avg=0.00 llm_ms_avg=0.00
+HigressRAG llm_generation           count=2048 cache_hit_rate=0.00 total_ms_avg=68.23 retrieval_ms_avg=21.55 memory_load_ms_avg=0.00 memory_store_ms_avg=0.00 llm_ms_avg=46.61
+HigressRAG non_cached_complex_query count=2048 cache_hit_rate=0.00 total_ms_avg=70.31 retrieval_ms_avg=22.16 memory_load_ms_avg=0.00 memory_store_ms_avg=0.00 llm_ms_avg=48.05
+HigressRAG retrieval_hybrid         count=2048 cache_hit_rate=0.00 total_ms_avg=21.45 retrieval_ms_avg=21.40 memory_load_ms_avg=0.00 memory_store_ms_avg=0.00 llm_ms_avg=0.00
+HigressRAG semantic_cache_lookup    count=2048 cache_hit_rate=1.00 total_ms_avg=0.03 retrieval_ms_avg=0.00 memory_load_ms_avg=0.00 memory_store_ms_avg=0.00 llm_ms_avg=0.00
+Wrote /project/bi_dsc_community/drc_rag/higress_agentic_benchmark/slurm_runs/11141981/summary.csv
+Wrote /project/bi_dsc_community/drc_rag/higress_agentic_benchmark/slurm_runs/11141981/full_summary.csv

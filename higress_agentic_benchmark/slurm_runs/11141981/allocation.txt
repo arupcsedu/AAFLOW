@@ -1,0 +1,8 @@
+job_id=11141981
+physical_workers=64
+world_size=64
+benchmark_mode=fair_parallelism_plus_overlap
+vector_backend=faiss
+query_count=32
+repeat=5
+data_dir=/project/bi_dsc_community/drc_rag/data/wikitext2_train
