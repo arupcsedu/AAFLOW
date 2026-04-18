@@ -4,6 +4,7 @@ import csv
 import hashlib
 import json
 import random
+import statistics
 import string
 import time
 from dataclasses import asdict, dataclass
@@ -23,6 +24,7 @@ class BenchmarkConfig:
     embedding_model: str
     generation_model: str
     chroma_path: str | None
+    faiss_path: str | None
     data_dir: str
     file_glob: str
     nodes: int
@@ -35,6 +37,7 @@ class BenchmarkConfig:
     load_workers: int
     transform_workers: int
     async_workers: int
+    physical_workers: int | None
     embed_workers: int | None
     upsert_workers: int | None
     embed_dim: int
@@ -257,6 +260,31 @@ class ChromaVectorStore:
         )
 
 
+class FaissVectorStore:
+    def __init__(self, dim: int, path: str | None):
+        import faiss
+        import numpy as np
+        import threading
+
+        self.faiss = faiss
+        self.np = np
+        self.lock = threading.Lock()
+        self.path = Path(path) if path else None
+        if self.path:
+            self.path.mkdir(parents=True, exist_ok=True)
+        self.index = faiss.IndexFlatL2(dim)
+        self.rows: List[Dict[str, Any]] = []
+
+    def upsert_batch(self, ids: Sequence[str], vectors: Sequence[Sequence[float]], documents: Sequence[str]) -> None:
+        if not ids:
+            return
+        arr = self.np.asarray(vectors, dtype="float32")
+        with self.lock:
+            self.index.add(arr)
+            for row_id, vec, doc in zip(ids, vectors, documents):
+                self.rows.append({"id": row_id, "vector": list(vec), "document": doc})
+
+
 def batched(seq: Sequence[Any], batch_size: int) -> Iterable[Sequence[Any]]:
     batch_size = max(1, batch_size)
     for i in range(0, len(seq), batch_size):
@@ -277,7 +305,35 @@ def _requested_row(row: PipelineMetrics) -> Dict[str, Any]:
     }
 
 
-def write_metrics(output_dir: Path, rows: Sequence[PipelineMetrics]) -> None:
+def median_metrics(rows: Sequence[PipelineMetrics]) -> PipelineMetrics:
+    if not rows:
+        raise ValueError("median_metrics requires at least one row")
+    first = rows[0]
+
+    def med(attr: str) -> float:
+        return float(statistics.median(getattr(row, attr) for row in rows))
+
+    def med_int(attr: str) -> int:
+        return int(round(statistics.median(getattr(row, attr) for row in rows)))
+
+    return PipelineMetrics(
+        framework=first.framework,
+        runtime_mode=first.runtime_mode,
+        documents_loaded=med_int("documents_loaded"),
+        chunks=med_int("chunks"),
+        generated_prompts=med_int("generated_prompts"),
+        generated_tokens=med_int("generated_tokens"),
+        load_s=med("load_s"),
+        transform_s=med("transform_s"),
+        generation_s=med("generation_s"),
+        tokens_per_second=med("tokens_per_second"),
+        embed_s=med("embed_s"),
+        upsert_s=med("upsert_s"),
+        total_s=med("total_s"),
+    )
+
+
+def write_metrics(output_dir: Path, rows: Sequence[PipelineMetrics], full_rows: Sequence[Dict[str, Any]] | None = None) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     summary_path = output_dir / "summary.csv"
     full_path = output_dir / "full_summary.csv"
@@ -300,15 +356,18 @@ def write_metrics(output_dir: Path, rows: Sequence[PipelineMetrics]) -> None:
         for row in rows:
             writer.writerow(_requested_row(row))
 
-    full_fields = list(asdict(rows[0]).keys()) if rows else []
+    if full_rows is None:
+        full_rows = [asdict(row) for row in rows]
+
+    full_fields = list(full_rows[0].keys()) if full_rows else []
     with full_path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=full_fields)
         writer.writeheader()
-        for row in rows:
-            writer.writerow(asdict(row))
+        for row in full_rows:
+            writer.writerow(row)
 
     with json_path.open("w", encoding="utf-8") as f:
-        json.dump([asdict(row) for row in rows], f, indent=2)
+        json.dump(full_rows, f, indent=2)
 
 
 def build_embedder(config: BenchmarkConfig):
@@ -326,4 +385,6 @@ def build_generator(config: BenchmarkConfig):
 def build_vector_store(config: BenchmarkConfig):
     if config.vector_backend == "chroma":
         return ChromaVectorStore(config.chroma_path)
+    if config.vector_backend == "faiss":
+        return FaissVectorStore(config.embed_dim, config.faiss_path)
     return SimpleVectorStore(config.upsert_overhead_ms, config.upsert_per_item_ms)

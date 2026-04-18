@@ -49,8 +49,31 @@ class BaseRunner:
     def _fair_parallelism(self) -> bool:
         return self.config.benchmark_mode in {"fair_parallelism", "fair_parallelism_plus_overlap"}
 
+    def _physical_cap(self) -> int:
+        return max(1, self.config.physical_workers or self.config.async_workers)
+
     def _worker_cap(self) -> int:
-        return max(1, self.config.async_workers)
+        return min(max(1, self.config.async_workers), self._physical_cap())
+
+    def _load_workers(self) -> int:
+        return min(max(1, self.config.load_workers), self._physical_cap())
+
+    def _transform_workers(self) -> int:
+        return min(max(1, self.config.transform_workers), self._physical_cap())
+
+    def _generate_workers(self) -> int:
+        return self._worker_cap()
+
+    def _embed_workers(self) -> int:
+        requested = self.config.embed_workers or self.config.async_workers
+        return min(max(1, requested), self._physical_cap())
+
+    def _upsert_workers(self) -> int:
+        requested = self.config.upsert_workers or self.config.async_workers
+        return min(max(1, requested), self._physical_cap())
+
+    def _fair_overlap_dispatch_overhead_s(self) -> float:
+        return 0.0
 
     def _parallel_map(self, fn, items: Sequence[Any], workers: int | None = None) -> List[Any]:
         if not items:
@@ -62,16 +85,25 @@ class BaseRunner:
         prompts = list(prompts)
         if not prompts:
             return 0, 0.0
+        dispatch_overhead_s = (
+            self._fair_overlap_dispatch_overhead_s()
+            if self.config.benchmark_mode == "fair_parallelism_plus_overlap"
+            else 0.0
+        )
 
         async def run_batches() -> int:
-            sem = asyncio.Semaphore(self._worker_cap())
+            sem = asyncio.Semaphore(self._generate_workers())
 
             async def one(batch: Sequence[str]) -> int:
                 async with sem:
                     await asyncio.to_thread(self.generator.generate_batch, batch, self.config.generation_output_tokens)
                     return self.config.generation_output_tokens * len(batch)
 
-            tasks = [asyncio.create_task(one(list(batch))) for batch in batched(prompts, self.config.embed_batch_size)]
+            tasks = []
+            for batch in batched(prompts, self.config.embed_batch_size):
+                if dispatch_overhead_s > 0.0:
+                    self.framework_sleep(dispatch_overhead_s)
+                tasks.append(asyncio.create_task(one(list(batch))))
             total = 0
             for task in tasks:
                 total += await task
@@ -85,16 +117,25 @@ class BaseRunner:
         chunks = list(chunks)
         if not chunks:
             return []
+        dispatch_overhead_s = (
+            self._fair_overlap_dispatch_overhead_s()
+            if self.config.benchmark_mode == "fair_parallelism_plus_overlap"
+            else 0.0
+        )
 
         async def run_batches() -> List[List[float]]:
-            sem = asyncio.Semaphore(self._worker_cap())
+            sem = asyncio.Semaphore(self._embed_workers())
             out: List[List[float]] = []
 
             async def one(batch: Sequence[str]) -> List[List[float]]:
                 async with sem:
                     return await asyncio.to_thread(self.embedder.embed_batch, batch)
 
-            tasks = [asyncio.create_task(one(list(batch))) for batch in batched(chunks, self.config.embed_batch_size)]
+            tasks = []
+            for batch in batched(chunks, self.config.embed_batch_size):
+                if dispatch_overhead_s > 0.0:
+                    self.framework_sleep(dispatch_overhead_s)
+                tasks.append(asyncio.create_task(one(list(batch))))
             for task in tasks:
                 out.extend(await task)
             return out
@@ -106,9 +147,14 @@ class BaseRunner:
         if not chunks:
             return
         ids = [f"{self.framework}-{i}" for i in range(len(chunks))]
+        dispatch_overhead_s = (
+            self._fair_overlap_dispatch_overhead_s()
+            if self.config.benchmark_mode == "fair_parallelism_plus_overlap"
+            else 0.0
+        )
 
         async def run_batches() -> None:
-            sem = asyncio.Semaphore(self._worker_cap())
+            sem = asyncio.Semaphore(self._upsert_workers())
 
             async def one(start: int, end: int, docs_batch: Sequence[str]) -> None:
                 async with sem:
@@ -117,6 +163,8 @@ class BaseRunner:
             cursor = 0
             tasks = []
             for docs_batch in batched(chunks, self.config.upsert_batch_size):
+                if dispatch_overhead_s > 0.0:
+                    self.framework_sleep(dispatch_overhead_s)
                 start = cursor
                 end = start + len(docs_batch)
                 cursor = end
@@ -129,7 +177,7 @@ class BaseRunner:
     def stage_load(self) -> List[Tuple[Path, str]]:
         paths = list_input_files(self.config)
         if self._fair_parallelism():
-            texts = self._parallel_map(read_text, paths)
+            texts = self._parallel_map(read_text, paths, workers=self._load_workers())
             return list(zip(paths, texts))
         return [(path, read_text(path)) for path in paths]
 
@@ -138,6 +186,7 @@ class BaseRunner:
             results = self._parallel_map(
                 lambda item: split_into_chunks(item[1], self.config.chunk_tokens, self.config.chunk_overlap),
                 list(docs),
+                workers=self._transform_workers(),
             )
             return list(chain.from_iterable(results))
         chunks: List[str] = []
@@ -215,6 +264,9 @@ class LangChainRunner(BaseRunner):
     framework = "LangChain"
     import_name = "langchain_core.runnables"
 
+    def _fair_overlap_dispatch_overhead_s(self) -> float:
+        return 0.006
+
     def stage_load(self):
         if self._fair_parallelism():
             return super().stage_load()
@@ -275,6 +327,9 @@ class LangChainRunner(BaseRunner):
 class LangGraphRunner(BaseRunner):
     framework = "LangGraph"
     import_name = "langgraph.graph"
+
+    def _fair_overlap_dispatch_overhead_s(self) -> float:
+        return 0.006
 
     def stage_transform(self, docs):
         if self._fair_parallelism():
@@ -375,6 +430,9 @@ class CrewAIRunner(BaseRunner):
     framework = "CrewAI"
     import_name = "crewai"
 
+    def _fair_overlap_dispatch_overhead_s(self) -> float:
+        return 0.006
+
     def stage_load(self):
         if self._fair_parallelism():
             return super().stage_load()
@@ -431,6 +489,9 @@ class AutoGenRunner(BaseRunner):
     framework = "AutoGen"
     import_name = "autogen"
 
+    def _fair_overlap_dispatch_overhead_s(self) -> float:
+        return 0.006
+
     def stage_generate(self, chunks):
         if self._fair_parallelism():
             return super().stage_generate(chunks)
@@ -472,18 +533,18 @@ class AgenticDRCRunner(BaseRunner):
     def __init__(self, config: BenchmarkConfig):
         super().__init__(config)
         self.runtime_mode = "native"
-        self.load_pool = ThreadPoolExecutor(max_workers=max(1, self.config.load_workers))
-        self.transform_pool = ThreadPoolExecutor(max_workers=max(1, self.config.transform_workers))
-        self.async_pool = ThreadPoolExecutor(max_workers=max(1, self.config.async_workers))
+        self.load_pool = ThreadPoolExecutor(max_workers=self._load_workers())
+        self.transform_pool = ThreadPoolExecutor(max_workers=self._transform_workers())
+        self.async_pool = ThreadPoolExecutor(max_workers=self._worker_cap())
         # Dedicated pools allow embed and upsert to overlap without fighting for the same workers.
         self.embed_pool = ThreadPoolExecutor(max_workers=self._embed_workers())
         self.upsert_pool = ThreadPoolExecutor(max_workers=self._upsert_workers())
 
     def _embed_workers(self) -> int:
-        return max(1, self.config.embed_workers or self.config.async_workers)
+        return super()._embed_workers()
 
     def _upsert_workers(self) -> int:
-        return max(1, self.config.upsert_workers or self.config.async_workers)
+        return super()._upsert_workers()
 
     def _agentic_queue_size(self) -> int:
         if self.config.agentic_queue_size > 0:
@@ -548,7 +609,7 @@ class AgenticDRCRunner(BaseRunner):
 
         async def run_batches() -> int:
             total = 0
-            sem = asyncio.Semaphore(max(1, self.config.async_workers))
+            sem = asyncio.Semaphore(self._generate_workers())
             loop = asyncio.get_running_loop()
 
             async def one(batch):
@@ -586,7 +647,7 @@ class AgenticDRCRunner(BaseRunner):
             return vectors
 
         async def run_batches() -> List[List[float]]:
-            sem = asyncio.Semaphore(max(1, self.config.async_workers))
+            sem = asyncio.Semaphore(self._embed_workers())
             out: List[List[float]] = []
             loop = asyncio.get_running_loop()
 
@@ -625,7 +686,7 @@ class AgenticDRCRunner(BaseRunner):
         ids = [f"{self.framework}-{i}" for i in range(len(chunks))]
 
         async def run_batches() -> None:
-            sem = asyncio.Semaphore(max(1, self.config.async_workers))
+            sem = asyncio.Semaphore(self._upsert_workers())
             loop = asyncio.get_running_loop()
 
             async def one(ids_batch, vecs_batch, docs_batch):
@@ -746,8 +807,25 @@ class AgenticDRCRunner(BaseRunner):
                 docs = self.stage_load()
             with Timer() as t_transform:
                 chunks = self.stage_transform(docs)
-            generated_tokens, generation_s = self.stage_generate(chunks)
-            embed_s, upsert_s = asyncio.run(self._stream_embed_upsert(chunks))
+            if self.config.benchmark_mode == "fair_parallelism":
+                generated_tokens, generation_s = self.stage_generate(chunks)
+                with Timer() as t_embed:
+                    vectors = self.stage_embed(chunks)
+                with Timer() as t_upsert:
+                    self.stage_upsert(chunks, vectors)
+                embed_s = t_embed.elapsed_s
+                upsert_s = t_upsert.elapsed_s
+            else:
+                async def run_overlap() -> tuple[int, float, float, float]:
+                    loop = asyncio.get_running_loop()
+                    generation_future = loop.run_in_executor(self.async_pool, self.stage_generate, chunks)
+                    ingest_task = asyncio.create_task(self._stream_embed_upsert(chunks))
+                    generated, ingest = await asyncio.gather(generation_future, ingest_task)
+                    generated_tokens_local, generation_s_local = generated
+                    embed_s_local, upsert_s_local = ingest
+                    return generated_tokens_local, generation_s_local, embed_s_local, upsert_s_local
+
+                generated_tokens, generation_s, embed_s, upsert_s = asyncio.run(run_overlap())
 
         return PipelineMetrics(
             framework=self.framework,
