@@ -1,4 +1,4 @@
-# Higress vs Agentic RAG Benchmark
+# Higress vs AAFLOW Benchmark
 
 This directory contains a standalone benchmark that compares `HigressRAG` and `AgenticRAG(AAFLOW)` on local corpora.
 
