@@ -829,7 +829,7 @@ async def main_async() -> None:
                 ResultRow(
                     mode,
                     nnodes,
-                    "AgenticDRC",
+                    "AAFLOW",
                     len(nodes_async),
                     load_s,
                     transform_s,
@@ -844,9 +844,9 @@ async def main_async() -> None:
 
             # Highlight Set5 vs Set4 at this scale
             r4 = next(r for r in rows if r.config == "AsyncParallelOnly")
-            r5 = next(r for r in rows if r.config == "AgenticDRC")
+            r5 = next(r for r in rows if r.config == "AAFLOW")
             print(
-                f"AgenticDRC vs AsyncParallelOnly total improvement at nnodes={nnodes}: "
+                f"AAFLOW vs AsyncParallelOnly total improvement at nnodes={nnodes}: "
                 f"{pct_faster(r4.total_s, r5.total_s):.1f}% faster\n"
             )
 

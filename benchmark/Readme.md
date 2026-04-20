@@ -39,7 +39,7 @@ It reports:
 - Async embedding concurrency only
 - Upsert batch size fixed at `1`
 
-### Set 5: `AgenticDRC(AAFLOW)`
+### Set 5: `AAFLOW(AAFLOW)`
 - Sync load
 - Async transform pipeline
 - Async embedding with batching
@@ -71,7 +71,7 @@ It reports:
 - Direct delimiter chunking
 - Parallel embedding
 - Parallel batched upsert
-- Thin ingestion baseline for comparison against `AgenticDRC`
+- Thin ingestion baseline for comparison against `AAFLOW`
 
 
 ## Installation
@@ -229,16 +229,16 @@ python /project/bi_dsc_community/drc_rag/benchmark/benchmark_configs_1_to_5.py \
   --no-scale-set5-batches
 ```
 
-### Run AsyncParallelOnly, AgenticDRC(AAFLOW), Ray, Dask, and Higress with the best Set5 tuning
+### Run AsyncParallelOnly, AAFLOW(AAFLOW), Ray, Dask, and Higress with the best Set5 tuning
 
-Current best completed fair comparison for `AgenticDRC` vs `HigressRAG` uses:
+Current best completed fair comparison for `AAFLOW` vs `HigressRAG` uses:
 
 - `--set5-embed-workers 96`
 - `--set5-upsert-workers 8`
 - `--set5-upsert-timeout-ms 2`
 - `--set5-upsert-shards 64`
 
-This setting produced a best observed `AgenticDRC(AAFLOW) vs HigressRAG` improvement of `29.4% faster`.
+This setting produced a best observed `AAFLOW(AAFLOW) vs HigressRAG` improvement of `29.4% faster`.
 
 ```bash
 python /project/bi_dsc_community/drc_rag/benchmark/benchmark_configs_1_to_5.py \
@@ -361,7 +361,7 @@ Available profiles:
 
 - `default`: standard Set 4, Set 5, Ray, Dask, BSP sweep behavior
 - `bsp_large`: runs only BSP with large benchmark defaults
-- `no_bsp_large`: disables BSP and keeps a large benchmark profile for AgenticDRC, Ray, and Dask
+- `no_bsp_large`: disables BSP and keeps a large benchmark profile for AAFLOW, Ray, and Dask
 
 
 ## Slurm Submission Commands

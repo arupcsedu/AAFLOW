@@ -20,7 +20,7 @@ from .common import (
     summarize_metrics,
     write_summary_csv,
 )
-from .engines import AgenticRAGEngine, EngineConfig, HigressRAGEngine, build_llm
+from .engines import AAFLOWEngine, EngineConfig, HigressRAGEngine, build_llm
 
 
 def _barrier(run_dir: Path, name: str, rank: int, world: int, poll_s: float = 0.1) -> None:
@@ -205,7 +205,7 @@ def main() -> int:
     )
     engine_specs = [
         ("HigressRAG", lambda: HigressRAGEngine(name="HigressRAG", chunks=chunks, llm=higress_llm, config=config)),
-        ("AgenticRAG", lambda: AgenticRAGEngine(chunks=chunks, llm=agentic_llm, config=config)),
+        ("AAFLOW", lambda: AAFLOWEngine(chunks=chunks, llm=agentic_llm, config=config)),
     ]
     wanted = {item.strip() for item in args.engine_filter.split(",") if item.strip()}
     engine_specs = [item for item in engine_specs if not wanted or item[0] in wanted]

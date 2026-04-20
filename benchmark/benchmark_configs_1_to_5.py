@@ -1469,6 +1469,13 @@ def run_set6_ray_data(
         if ray_address:
             ray.init(address=ray_address, ignore_reinit_error=True, include_dashboard=False)
             cluster_cpus = int(ray.cluster_resources().get("CPU", 0) or 0)
+        elif ray_num_cpus is None and ray_object_store_memory_mb <= 0:
+            # When an external Ray cluster is already discoverable via the
+            # environment, connect with no local resource sizing arguments.
+            # Passing num_cpus/object_store_memory in that case makes ray.init()
+            # reject the connection.
+            ray.init(ignore_reinit_error=True, include_dashboard=False)
+            cluster_cpus = int(ray.cluster_resources().get("CPU", 0) or 0)
         else:
             ray.init(
                 ignore_reinit_error=True,
@@ -1985,8 +1992,8 @@ def print_table(rows: List[ResultRow], baseline_label: str | None = None) -> Non
     if not rows:
         return
 
-    if len(rows) == 1 and rows[0].config == "AgenticDRC":
-        print("\nNote: Set5 AgenticDRC stage columns are pipeline-segment timings in the streaming path.\n")
+    if len(rows) == 1 and rows[0].config == "AAFLOW":
+        print("\nNote: Set5 AAFLOW stage columns are pipeline-segment timings in the streaming path.\n")
 
     if baseline_label is None:
         baseline_label = rows[0].config
@@ -2085,8 +2092,8 @@ def parse_args() -> argparse.Namespace:
         choices=["early", "last", "alternate"],
         default="early",
         help=(
-            "Execution order for AgenticDRC relative to the other sets. "
-            "'alternate' flips AgenticDRC after Higress on every other worker bucket."
+            "Execution order for AAFLOW relative to the other sets. "
+            "'alternate' flips AAFLOW after Higress on every other worker bucket."
         ),
     )
 
@@ -2187,7 +2194,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--only-dask", action="store_true", help="Run only Set7 Dask experiment.")
     p.add_argument("--only-bsp", action="store_true", help="Run only Set8 BSP experiment.")
     p.add_argument("--only-higress", action="store_true", help="Run only Set9 Higress RAG experiment.")
-    p.add_argument("--only-agentic", action="store_true", help="Run only Set5 AgenticDRC experiment.")
+    p.add_argument("--only-agentic", action="store_true", help="Run only Set5 AAFLOW experiment.")
     p.add_argument("--ray-num-cpus", type=int, default=0, help="Optional CPUs for ray.init (0 = Ray default).")
     p.add_argument(
         "--ray-input-format",
@@ -2508,7 +2515,7 @@ async def main_async() -> None:
 
                 plt.figure(figsize=(8, 4.5))
                 plt.plot(xs, set4, marker="o", label="AsyncParallelOnly (Set4)")
-                plt.plot(xs, set5, marker="o", label="AgenticDRC (Set5)")
+                plt.plot(xs, set5, marker="o", label="AAFLOW (Set5)")
                 plt.title("Async Workers vs Total Time")
                 plt.xlabel("Async Workers (effective)")
                 plt.ylabel("Total Time (s)")
@@ -2617,7 +2624,7 @@ async def main_async() -> None:
                     upsert_coalesce_multiplier=args.set5_upsert_coalesce_multiplier,
                 )
             total_s = time.perf_counter() - t0
-            return ResultRow("AgenticDRC", set5_nodes, load_s, transform_s, embed_s, upsert_s, total_s)
+            return ResultRow("AAFLOW", set5_nodes, load_s, transform_s, embed_s, upsert_s, total_s)
 
         agentic_run_last = False
         if args.agentic_order == "last":
@@ -2739,16 +2746,16 @@ async def main_async() -> None:
 
         # Small highlight: Set5 vs Set4
         r4 = next((r for r in rows if r.config == "AsyncParallelOnly"), None)
-        r5 = next((r for r in rows if r.config == "AgenticDRC"), None)
+        r5 = next((r for r in rows if r.config == "AAFLOW"), None)
         rh = next((r for r in rows if r.config == "HigressRAG"), None)
         if r4 and r5:
             print(
-                "AgenticDRC vs AsyncParallelOnly total improvement: "
+                "AAFLOW vs AsyncParallelOnly total improvement: "
                 f"{pct_faster(r4.total_s, r5.total_s):.1f}% faster with {effective_async_workers} Workers\n"
             )
         if rh and r5:
             print(
-                "AgenticDRC vs HigressRAG total improvement: "
+                "AAFLOW vs HigressRAG total improvement: "
                 f"{pct_faster(rh.total_s, r5.total_s):.1f}% faster with {effective_async_workers} Workers\n"
             )
 

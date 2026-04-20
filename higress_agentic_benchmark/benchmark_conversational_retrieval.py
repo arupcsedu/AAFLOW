@@ -192,7 +192,7 @@ def _process_case(case: RetrievalCase) -> List[RetrievalResult]:
     results: List[RetrievalResult] = []
     for engine_name, effective_query in (
         ("HigressRAG", case.followup_query),
-        ("AgenticDRC", f"{case.seed_query}\nFollow-up: {case.followup_query}"),
+        ("AAFLOW", f"{case.seed_query}\nFollow-up: {case.followup_query}"),
     ):
         hit_ids = _WORKER_SEARCHER.search_ids(effective_query, top_k=_WORKER_TOP_K)
         top1, hit_k, rr = _rank_hit_ids(hit_ids, case.expected_chunk_id)
@@ -281,7 +281,7 @@ def _write_csv(path: Path, rows: Sequence[dict]) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Conversational retrieval accuracy benchmark for HigressRAG vs AgenticDRC")
+    p = argparse.ArgumentParser(description="Conversational retrieval accuracy benchmark for HigressRAG vs AAFLOW")
     p.add_argument("--data-dir", type=str, default=str(Path(__file__).resolve().parents[1] / "data" / "wikitext_eval"))
     p.add_argument("--file-glob", type=str, default="*")
     p.add_argument("--max-chars", type=int, default=900)

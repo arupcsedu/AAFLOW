@@ -204,9 +204,9 @@ class HigressRAGEngine(BaseBenchmarkEngine):
         )
 
 
-class AgenticRAGEngine(BaseBenchmarkEngine):
+class AAFLOWEngine(BaseBenchmarkEngine):
     def __init__(self, chunks: Sequence[CorpusChunk], llm, config: EngineConfig):
-        super().__init__(name="AgenticRAG", chunks=chunks, llm=llm, config=config)
+        super().__init__(name="AAFLOW", chunks=chunks, llm=llm, config=config)
         self.memory = MemoryModule(MemoryConfig(dim=self.embedder.dim))
 
     def _build_context(self, query: str, hits: Sequence[RetrievalHit], query_embedding: np.ndarray) -> Tuple[str, float]:

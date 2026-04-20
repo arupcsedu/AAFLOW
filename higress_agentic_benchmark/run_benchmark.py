@@ -10,7 +10,7 @@ from .common import (
     write_summary_csv,
     write_summary_json,
 )
-from .engines import AgenticRAGEngine, EngineConfig, HigressRAGEngine, build_llm
+from .engines import AAFLOWEngine, EngineConfig, HigressRAGEngine, build_llm
 
 
 def parse_args() -> argparse.Namespace:
@@ -94,7 +94,7 @@ def main() -> None:
 
     engines = [
         HigressRAGEngine(name="HigressRAG", chunks=chunks, llm=higress_llm, config=config),
-        AgenticRAGEngine(chunks=chunks, llm=agentic_llm, config=config),
+        AAFLOWEngine(chunks=chunks, llm=agentic_llm, config=config),
     ]
     wanted = {item.strip() for item in args.engine_filter.split(",") if item.strip()}
     if wanted:

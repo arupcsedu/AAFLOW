@@ -5,7 +5,7 @@ This directory contains a standalone RAG pipeline benchmark for comparing RAG in
 - `LangGraph`
 - `CrewAI`
 - `AutoGen`
-- `AgenticDRC(AAFLOW)`
+- `AAFLOW(AAFLOW)`
 
 It measures:
 - `load_s`
@@ -28,7 +28,7 @@ Supported benchmark modes:
 
 Use:
 - `fair_parallelism` for equal worker caps and equal stage batch sizing.
-- `fair_parallelism_plus_overlap` for overlap-oriented comparisons where `AgenticDRC(AAFLOW)` keeps a native overlapping pipeline and non-Agentic frameworks incur modeled dispatch overhead per batch.
+- `fair_parallelism_plus_overlap` for overlap-oriented comparisons where `AAFLOW(AAFLOW)` keeps a native overlapping pipeline and non-Agentic frameworks incur modeled dispatch overhead per batch.
 
 Important note:
 - the current FAISS overlap benchmark is intentionally designed to expose orchestration and stage-overlap advantages.
@@ -144,7 +144,7 @@ Basic run:
 
 Useful single-process options:
 - `--physical-workers N`
-- `--framework-filter AgenticDRC,AutoGen`
+- `--framework-filter AAFLOW,AutoGen`
 - `--repeat N`
 - `--faiss-path PATH`
 - `--chroma-path PATH`
@@ -217,10 +217,10 @@ For `VECTOR_BACKEND=chroma`:
 ### FAISS overlap profile
 
 The current FAISS overlap benchmark is intentionally designed to make overlap and orchestration differences visible:
-- `AgenticDRC(AAFLOW)` uses native overlap between generation and streaming `embed -> upsert`
+- `AAFLOW(AAFLOW)` uses native overlap between generation and streaming `embed -> upsert`
 - non-Agentic frameworks execute the same stages with modeled per-batch dispatch overhead in `fair_parallelism_plus_overlap`
 
-This is the profile used when the goal is to demonstrate a large `AgenticDRC(AAFLOW)` advantage.
+This is the profile used when the goal is to demonstrate a large `AAFLOW(AAFLOW)` advantage.
 
 ### Chroma profile
 
@@ -263,7 +263,7 @@ Output folder:
 - `drc_rag/framework_rag_pipeline_benchmark/slurm_runs/11130710/`
 
 Observed summary:
-- `AgenticDRC(AAFLOW)`: `total_s=3.380`, `upsert_s=1.848`, `embed_s=0.276`
+- `AAFLOW(AAFLOW)`: `total_s=3.380`, `upsert_s=1.848`, `embed_s=0.276`
 - `LangChain`: `total_s=3.697`, `upsert_s=2.136`, `embed_s=0.320`
 - `CrewAI`: `total_s=3.987`, `upsert_s=2.434`, `embed_s=0.316`
 - `LangGraph`: `total_s=4.583`, `upsert_s=3.036`, `embed_s=0.322`
@@ -287,14 +287,14 @@ Output folder:
 - `drc_rag/framework_rag_pipeline_benchmark/slurm_runs/11140904/`
 
 Observed summary:
-- `AgenticDRC`: `total_s=0.875`, `embed_s=0.486`, `upsert_s=0.049`
+- `AAFLOW`: `total_s=0.875`, `embed_s=0.486`, `upsert_s=0.049`
 - `AutoGen`: `total_s=1.614`, `embed_s=1.136`, `upsert_s=0.135`
 - `LangGraph`: `total_s=1.614`, `embed_s=1.140`, `upsert_s=0.136`
 - `CrewAI`: `total_s=1.625`, `embed_s=1.145`, `upsert_s=0.133`
 - `LangChain`: `total_s=1.645`, `embed_s=1.149`, `upsert_s=0.140`
 
 Improvement vs `LangChain`:
-- `AgenticDRC` is about `46.8%` faster in this overlap-oriented FAISS benchmark.
+- `AAFLOW` is about `46.8%` faster in this overlap-oriented FAISS benchmark.
 
 Latest confirmation rerun of the same configuration:
 - `11787868`
@@ -303,7 +303,7 @@ Output folder:
 - `drc_rag/framework_rag_pipeline_benchmark/slurm_runs/11787868/`
 
 Observed summary:
-- `AgenticDRC(AAFLOW)`: `total_s=0.916`, `load_s=0.024`, `transform_s=0.015`, `embed_s=0.492`, `upsert_s=0.072`
+- `AAFLOW(AAFLOW)`: `total_s=0.916`, `load_s=0.024`, `transform_s=0.015`, `embed_s=0.492`, `upsert_s=0.072`
 - `LangGraph`: `total_s=1.641`, `embed_s=1.149`, `upsert_s=0.137`
 - `AutoGen`: `total_s=1.647`, `embed_s=1.154`, `upsert_s=0.157`
 - `CrewAI`: `total_s=1.653`, `embed_s=1.161`, `upsert_s=0.141`
@@ -311,7 +311,7 @@ Observed summary:
 
 Interpretation:
 - `11787868` confirms that the `11140904` Slurm configuration is still valid.
-- `AgenticDRC(AAFLOW)` remains the fastest framework in the distributed FAISS overlap profile.
+- `AAFLOW(AAFLOW)` remains the fastest framework in the distributed FAISS overlap profile.
 - `11140904` remains the best observed run for this exact configuration.
 
 ## Notes

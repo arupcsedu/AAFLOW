@@ -31,7 +31,7 @@ These stages are benchmarked independently and in aggregate.
 - `drc_rag/benchmark/`
   - Strong/weak scaling benchmarks for Agentic DRC, Ray-only, and no-Ray paths.
 - `drc_rag/framework_rag_pipeline_benchmark/`
-  - Framework-level benchmark for `AgenticDRC`, `LangChain`, `LangGraph`, `CrewAI`, and `AutoGen`.
+  - Framework-level benchmark for `AAFLOW`, `LangChain`, `LangGraph`, `CrewAI`, and `AutoGen`.
 - `drc_rag/higress_agentic_benchmark/`
   - HigressRAG vs AgenticRAG comparison benchmark.
 

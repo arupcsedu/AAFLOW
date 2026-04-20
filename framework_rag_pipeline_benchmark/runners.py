@@ -526,8 +526,8 @@ class AutoGenRunner(BaseRunner):
         return row
 
 
-class AgenticDRCRunner(BaseRunner):
-    framework = "AgenticDRC"
+class AAFLOWRunner(BaseRunner):
+    framework = "AAFLOW"
     import_name = None
 
     def __init__(self, config: BenchmarkConfig):
@@ -849,5 +849,5 @@ RUNNERS = [
     LangGraphRunner,
     CrewAIRunner,
     AutoGenRunner,
-    AgenticDRCRunner,
+    AAFLOWRunner,
 ]
