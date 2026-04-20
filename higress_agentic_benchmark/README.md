@@ -43,7 +43,6 @@ If you need a neutral benchmark, do not use this profile.
 - `distributed_higress_benchmark.py`: distributed Slurm-task benchmark with repeat/median aggregation
 - `run_higress_benchmark.slurm`: distributed Slurm launcher
 - `benchmark_conversational_retrieval.py`: legacy conversational retrieval benchmark
-- `agentic_drc_vs_higressrag.tex`: LaTeX report
 
 ## Metrics
 
