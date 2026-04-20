@@ -1,4 +1,4 @@
-# LlamaIndex Ingestion Benchmark
+# AAFLOW Ingestion Benchmark
 
 Author: Arup Sarker, `djy8hg@virginia.edu`, `arupcsedu@gmail.com`  
 Updated for Sets 1 through 9
