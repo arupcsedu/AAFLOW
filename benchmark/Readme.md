@@ -39,7 +39,7 @@ It reports:
 - Async embedding concurrency only
 - Upsert batch size fixed at `1`
 
-### Set 5: `AAFLOW(AAFLOW)`
+### Set 5: `AAFLOW`
 - Sync load
 - Async transform pipeline
 - Async embedding with batching
@@ -238,7 +238,7 @@ Current best completed fair comparison for `AAFLOW` vs `HigressRAG` uses:
 - `--set5-upsert-timeout-ms 2`
 - `--set5-upsert-shards 64`
 
-This setting produced a best observed `AAFLOW(AAFLOW) vs HigressRAG` improvement of `29.4% faster`.
+This setting produced a best observed `AAFLOW vs HigressRAG` improvement of `29.4% faster`.
 
 ```bash
 python /project/bi_dsc_community/drc_rag/benchmark/benchmark_configs_1_to_5.py \
@@ -264,6 +264,49 @@ python /project/bi_dsc_community/drc_rag/benchmark/benchmark_configs_1_to_5.py \
 Note:
 - `Set5` now uses true shard count independent of upsert worker count.
 - `Set5` upsert workers are multiplexed across shard-ready batches instead of one-worker-per-shard binding.
+
+## Current Validated Scaling Runs
+
+### Baseline no-Ray verification
+
+Weak scaling `128w` verification after the rename to `AAFLOW`:
+- job: `11863264`
+- output: `drc_rag/benchmark/slurm_runs_agentic_scaling/11863264/weak_no_ray_128w/`
+- result: `AAFLOW = 2.994s`
+
+Strong scaling `128w` verification after the rename to `AAFLOW`:
+- job: `11863460`
+- output: `drc_rag/benchmark/slurm_runs_agentic_scaling/11863460/strong_no_ray_128w/`
+- result: `AAFLOW = 31.952s`
+
+### Ray headline and engineering reference
+
+Semantic Ray headline run:
+- job: `11368267`
+- output: `drc_rag/benchmark/slurm_runs_agentic_scaling/11368267/strong_ray_only_128w/`
+- result: `Load = 46.893s`, `Transform = 0.003s`, `Embed = 25.909s`, `Upsert = 3.310s`, `Total = 76.145s`
+
+Aggressive engineering Ray reference:
+- job: `11392420`
+- output: `drc_rag/benchmark/slurm_runs_agentic_scaling/11392420/strong_ray_only_128w/`
+- result: `Load = 38.411s`, `Transform = 0.000s`, `Embed = 0.000s`, `Upsert = 4.509s`, `Total = 43.746s`
+- note: this run uses preembedded input and is not the semantic headline benchmark
+
+### Arrow comparison run
+
+Validated combined strong Arrow comparison:
+- job: `11862925`
+- output: `drc_rag/benchmark/slurm_runs_arrow_scaling/11862925/strong/summary.csv`
+
+Key results:
+- `AAFLOW = 3.210s`
+- `AAFLOW+ = 2.405s`
+- `RayDataScalableRAG = 164.424s`
+- `ArrowRayDataScalableRAG = 646.063s`
+
+Interpretation:
+- Arrow helps the no-Ray `AAFLOW+` path in this strong scaling comparison.
+- Arrow hurts the current Ray implementation badly and should not be treated as a default Ray optimization.
 
 
 ## Scaling-Oriented Configurations
@@ -330,10 +373,13 @@ python /project/bi_dsc_community/drc_rag/benchmark/benchmark_configs_1_to_5.py \
 
 ## Slurm Scripts
 
-There are two Slurm scripts:
+Current Slurm scripts in active use:
 
-- `/project/bi_dsc_community/drc_rag/benchmark/run_multinode_async_ray.sbatch`
-- `/project/bi_dsc_community/drc_rag/benchmark/run_multinode_set456_async_ray.sbatch`
+- `/project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch`
+- `/project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_arrow_agentic_drc.sbatch`
+- `/project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_arrow_scaling_compare.sbatch`
+
+Older scripts still exist for legacy sweeps, but the current benchmark flow uses the `slurm_scripts/` launchers.
 
 ### `run_multinode_async_ray.sbatch`
 
@@ -363,6 +409,58 @@ Available profiles:
 - `bsp_large`: runs only BSP with large benchmark defaults
 - `no_bsp_large`: disables BSP and keeps a large benchmark profile for AAFLOW, Ray, and Dask
 
+
+## Recommended Slurm Commands
+
+### Baseline strong no-Ray `128w`
+
+```bash
+sbatch --nodes=13 --ntasks-per-node=10 \
+  --export=ALL,PROFILE=strong_no_ray,PHYSICAL_WORKERS=128,CORES_PER_NODE=10,BASE_NODES=100000000,BASE_FILES=4096,CHUNKS_PER_FILE=100000,SHARED_CORPUS_ROOT=/scratch/djy8hg/aaflow_data/drc_rag_scaling_corpus_cache \
+  /project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch
+```
+
+This is the verified post-rename strong `AAFLOW` run shape used by `11863460`.
+
+### Baseline weak no-Ray `128w`
+
+```bash
+sbatch --nodes=4 --ntasks-per-node=40 \
+  --export=ALL,PROFILE=weak_no_ray,PHYSICAL_WORKERS=128,CORES_PER_NODE=40,BASE_NODES=100000,BASE_FILES=128,BASE_NODES_PER_WORKER=95000,CHUNKS_PER_FILE=1000,SHARED_CORPUS_ROOT=/scratch/djy8hg/aaflow_data/drc_rag_scaling_corpus_cache \
+  /project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch
+```
+
+### Semantic Ray-only `128w`
+
+```bash
+sbatch --nodes=4 --ntasks-per-node=40 \
+  --export=ALL,PROFILE=strong_ray_only,PHYSICAL_WORKERS=128,CORES_PER_NODE=40,BASE_NODES=10000000,BASE_FILES=4096,CHUNKS_PER_FILE=100000,RAY_INPUT_FORMAT=raw \
+  /project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch
+```
+
+### Arrow comparison, no-Ray only
+
+```bash
+sbatch --nodes=4 --ntasks-per-node=40 \
+  --export=ALL,MODE=no_ray_only,PROFILE=strong,PHYSICAL_WORKERS=128,CORES_PER_NODE=40,BASE_NODES=10000000,BASE_FILES=4096,NODE_CHARS=900,CHUNKS_PER_FILE=100000,EMBED_BATCH_SIZE=256,UPSERT_BATCH_SIZE=512,SINK_BACKEND=faiss \
+  /project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_arrow_scaling_compare.sbatch
+```
+
+### Arrow comparison, Ray only
+
+```bash
+sbatch --nodes=4 --ntasks-per-node=40 \
+  --export=ALL,MODE=ray_only,PROFILE=strong,PHYSICAL_WORKERS=128,CORES_PER_NODE=40,BASE_NODES=10000000,BASE_FILES=4096,NODE_CHARS=900,CHUNKS_PER_FILE=100000,EMBED_BATCH_SIZE=256,UPSERT_BATCH_SIZE=512,SINK_BACKEND=faiss \
+  /project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_arrow_scaling_compare.sbatch
+```
+
+### Arrow comparison, combined
+
+```bash
+sbatch --nodes=4 --ntasks-per-node=40 \
+  --export=ALL,MODE=both,PROFILE=strong,PHYSICAL_WORKERS=128,CORES_PER_NODE=40,BASE_NODES=10000000,BASE_FILES=4096,NODE_CHARS=900,CHUNKS_PER_FILE=100000,EMBED_BATCH_SIZE=256,UPSERT_BATCH_SIZE=512,SINK_BACKEND=faiss \
+  /project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_arrow_scaling_compare.sbatch
+```
 
 ## Slurm Submission Commands
 
@@ -449,6 +547,9 @@ Per-job outputs are written under:
 
 - `/project/bi_dsc_community/drc_rag/benchmark/slurm_runs/<jobid>/`
 - `/project/bi_dsc_community/drc_rag/benchmark/slurm_runs_set456/<jobid>/`
+- `/project/bi_dsc_community/drc_rag/benchmark/slurm_runs_agentic_scaling/<jobid>/`
+- `/project/bi_dsc_community/drc_rag/benchmark/slurm_runs_arrow_agentic_drc/<jobid>/`
+- `/project/bi_dsc_community/drc_rag/benchmark/slurm_runs_arrow_scaling/<jobid>/`
 
 Important files:
 

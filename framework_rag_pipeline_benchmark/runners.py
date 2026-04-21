@@ -844,10 +844,206 @@ class AAFLOWRunner(BaseRunner):
         )
 
 
+class AAFLOWPlusRunner(AAFLOWRunner):
+    framework = "AAFLOW+"
+
+    def __init__(self, config: BenchmarkConfig):
+        super().__init__(config)
+        import pyarrow as pa
+
+        self.pa = pa
+
+    def _arrow_vectors(self, vectors: Sequence[Sequence[float]]):
+        if not vectors:
+            values = self.pa.array([], type=self.pa.float32())
+            return self.pa.FixedSizeListArray.from_arrays(values, self.config.embed_dim)
+        flat = [value for vec in vectors for value in vec]
+        values = self.pa.array(flat, type=self.pa.float32())
+        return self.pa.FixedSizeListArray.from_arrays(values, self.config.embed_dim)
+
+    def _embed_arrow_table(self, chunks: Sequence[str]):
+        chunk_list = list(chunks)
+        ids = [f"{self.framework}-{i}" for i in range(len(chunk_list))]
+        if self._fair_parallelism():
+            futures = [
+                self.embed_pool.submit(self.embedder.embed_batch, list(batch))
+                for batch in batched(chunk_list, self.config.embed_batch_size)
+            ]
+            vectors: List[List[float]] = []
+            for fut in futures:
+                vectors.extend(fut.result())
+        else:
+            vectors = []
+            for batch in batched(chunk_list, self.config.embed_batch_size):
+                vectors.extend(self.embedder.embed_batch(list(batch)))
+        return self.pa.table(
+            {
+                "id": ids,
+                "text": chunk_list,
+                "vector": self._arrow_vectors(vectors),
+            }
+        )
+
+    def stage_upsert_arrow(self, embedded_table) -> None:
+        ids = embedded_table.column("id").to_pylist()
+        docs = embedded_table.column("text").to_pylist()
+        vectors = embedded_table.column("vector").to_pylist()
+        futures = [
+            self.upsert_pool.submit(self.vector_store.upsert_batch, list(ids_batch), list(vecs_batch), list(docs_batch))
+            for ids_batch, vecs_batch, docs_batch in self._coalesced_batches(ids, vectors, docs)
+        ]
+        for fut in futures:
+            fut.result()
+
+    async def _stream_embed_upsert_arrow(self, chunks: Sequence[str]) -> tuple[float, float]:
+        chunk_list = list(chunks)
+        if not chunk_list:
+            return 0.0, 0.0
+
+        loop = asyncio.get_running_loop()
+        ids = [f"{self.framework}-{i}" for i in range(len(chunk_list))]
+        queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=self._agentic_queue_size())
+        embed_elapsed = 0.0
+        upsert_elapsed = 0.0
+        flush_tasks: List[asyncio.Task[None]] = []
+        upsert_sem = asyncio.Semaphore(self._upsert_workers())
+
+        async def flush_table(table) -> None:
+            nonlocal upsert_elapsed
+            async with upsert_sem:
+                start = time.perf_counter()
+                await loop.run_in_executor(
+                    self.upsert_pool,
+                    self.vector_store.upsert_batch,
+                    table.column("id").to_pylist(),
+                    table.column("vector").to_pylist(),
+                    table.column("text").to_pylist(),
+                )
+                upsert_elapsed += time.perf_counter() - start
+
+        async def consumer() -> None:
+            pending = []
+            pending_rows = 0
+            target = self._agentic_coalesce_target()
+
+            async def flush_pending(force: bool) -> None:
+                nonlocal pending, pending_rows
+                if not pending:
+                    return
+                if not force and pending_rows < target:
+                    return
+                table = self.pa.concat_tables(pending) if len(pending) > 1 else pending[0]
+                if not force and len(table) > target:
+                    head = table.slice(0, target)
+                    tail = table.slice(target)
+                    pending = [tail]
+                    pending_rows = len(tail)
+                    flush_tasks.append(asyncio.create_task(flush_table(head)))
+                    return
+                pending = []
+                pending_rows = 0
+                flush_tasks.append(asyncio.create_task(flush_table(table)))
+
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                pending.append(item)
+                pending_rows += len(item)
+                await flush_pending(force=False)
+
+            while pending:
+                await flush_pending(force=True)
+            if flush_tasks:
+                await asyncio.gather(*flush_tasks)
+
+        async def producer() -> None:
+            nonlocal embed_elapsed
+            embed_sem = asyncio.Semaphore(self._embed_workers())
+            tasks: List[asyncio.Task[None]] = []
+            cursor = 0
+
+            async def one(ids_batch: List[str], docs_batch: List[str]) -> None:
+                nonlocal embed_elapsed
+                async with embed_sem:
+                    start = time.perf_counter()
+                    vecs = await loop.run_in_executor(self.embed_pool, self.embedder.embed_batch, docs_batch)
+                    embed_elapsed += time.perf_counter() - start
+                    await queue.put(
+                        self.pa.table(
+                            {
+                                "id": ids_batch,
+                                "text": docs_batch,
+                                "vector": self._arrow_vectors(vecs),
+                            }
+                        )
+                    )
+
+            for docs_batch in batched(chunk_list, self.config.embed_batch_size):
+                docs_batch = list(docs_batch)
+                start = cursor
+                end = start + len(docs_batch)
+                cursor = end
+                tasks.append(asyncio.create_task(one(ids[start:end], docs_batch)))
+
+            if tasks:
+                await asyncio.gather(*tasks)
+            await queue.put(None)
+
+        await asyncio.gather(producer(), consumer())
+        return embed_elapsed, upsert_elapsed
+
+    def native_execute(self) -> PipelineMetrics | None:
+        if self.config.benchmark_mode not in {"fair_parallelism", "fair_parallelism_plus_overlap"}:
+            return None
+
+        with Timer() as total_timer:
+            with Timer() as t_load:
+                docs = self.stage_load()
+            with Timer() as t_transform:
+                chunks = self.stage_transform(docs)
+            if self.config.benchmark_mode == "fair_parallelism":
+                generated_tokens, generation_s = self.stage_generate(chunks)
+                with Timer() as t_embed:
+                    embedded_table = self._embed_arrow_table(chunks)
+                with Timer() as t_upsert:
+                    self.stage_upsert_arrow(embedded_table)
+                embed_s = t_embed.elapsed_s
+                upsert_s = t_upsert.elapsed_s
+            else:
+                async def run_overlap() -> tuple[int, float, float, float]:
+                    loop = asyncio.get_running_loop()
+                    generation_future = loop.run_in_executor(self.async_pool, self.stage_generate, chunks)
+                    ingest_task = asyncio.create_task(self._stream_embed_upsert_arrow(chunks))
+                    generated, ingest = await asyncio.gather(generation_future, ingest_task)
+                    generated_tokens_local, generation_s_local = generated
+                    embed_s_local, upsert_s_local = ingest
+                    return generated_tokens_local, generation_s_local, embed_s_local, upsert_s_local
+
+                generated_tokens, generation_s, embed_s, upsert_s = asyncio.run(run_overlap())
+
+        return PipelineMetrics(
+            framework=self.framework,
+            runtime_mode=self.runtime_mode,
+            documents_loaded=len(docs),
+            chunks=len(chunks),
+            generated_prompts=min(self.config.generation_samples, len(chunks)),
+            generated_tokens=generated_tokens,
+            load_s=t_load.elapsed_s,
+            transform_s=t_transform.elapsed_s,
+            generation_s=generation_s,
+            tokens_per_second=(generated_tokens / generation_s) if generation_s > 0 else 0.0,
+            embed_s=embed_s,
+            upsert_s=upsert_s,
+            total_s=total_timer.elapsed_s,
+        )
+
+
 RUNNERS = [
     LangChainRunner,
     LangGraphRunner,
     CrewAIRunner,
     AutoGenRunner,
     AAFLOWRunner,
+    AAFLOWPlusRunner,
 ]

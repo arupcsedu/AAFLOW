@@ -164,10 +164,15 @@ Latest confirmation rerun:
 
 - job: `11787868`
 
+Current AAFLOW+ reference run:
+
+- job: `11978368`
+
 Reference:
 
 - `drc_rag/framework_rag_pipeline_benchmark/slurm_runs/11140904/`
 - `drc_rag/framework_rag_pipeline_benchmark/slurm_runs/11787868/`
+- `drc_rag/framework_rag_pipeline_benchmark/slurm_runs/11978368/`
 
 ### 3. Higress vs Agentic Benchmark
 
@@ -179,6 +184,10 @@ Current validated distributed run:
 
 - job: `11788136`
 
+AAFLOW+ parity reference run:
+
+- job: `11978502`
+
 Previous validated reference:
 
 - job: `11141981`
@@ -186,6 +195,7 @@ Previous validated reference:
 Reference:
 
 - `drc_rag/higress_agentic_benchmark/slurm_runs/11788136/`
+- `drc_rag/higress_agentic_benchmark/slurm_runs/11978502/`
 
 ## How To Run
 
@@ -333,11 +343,15 @@ Key files:
   - `drc_rag/framework_rag_pipeline_benchmark/slurm_runs/11140904/summary.csv`
 - Confirmation rerun:
   - `drc_rag/framework_rag_pipeline_benchmark/slurm_runs/11787868/summary.csv`
+- AAFLOW+ reference:
+  - `drc_rag/framework_rag_pipeline_benchmark/slurm_runs/11978368/summary.csv`
 
 ### Higress
 
 - Current validated run:
   - `drc_rag/higress_agentic_benchmark/slurm_runs/11788136/summary.csv`
+- AAFLOW+ parity reference:
+  - `drc_rag/higress_agentic_benchmark/slurm_runs/11978502/summary.csv`
 - Previous validated run:
   - `drc_rag/higress_agentic_benchmark/slurm_runs/11141981/summary.csv`
 

@@ -10,7 +10,7 @@ from .common import (
     write_summary_csv,
     write_summary_json,
 )
-from .engines import AAFLOWEngine, EngineConfig, HigressRAGEngine, build_llm
+from .engines import AAFLOWEngine, AAFLOWPlusEngine, EngineConfig, HigressRAGEngine, build_llm
 
 
 def parse_args() -> argparse.Namespace:
@@ -95,6 +95,7 @@ def main() -> None:
     engines = [
         HigressRAGEngine(name="HigressRAG", chunks=chunks, llm=higress_llm, config=config),
         AAFLOWEngine(chunks=chunks, llm=agentic_llm, config=config),
+        AAFLOWPlusEngine(chunks=chunks, llm=agentic_llm, config=config),
     ]
     wanted = {item.strip() for item in args.engine_filter.split(",") if item.strip()}
     if wanted:
@@ -108,9 +109,8 @@ def main() -> None:
     query_rows = []
     for repeat_index in range(max(1, args.repeat)):
         for scenario, cases in query_sets.items():
-            for case in cases:
-                for engine in engines:
-                    row = engine.run_query(scenario, case)
+            for engine in engines:
+                for row in engine.run_queries(scenario, cases):
                     setattr(row, "repeat_index", repeat_index)
                     query_rows.append(row)
 

@@ -20,7 +20,7 @@ from .common import (
     summarize_metrics,
     write_summary_csv,
 )
-from .engines import AAFLOWEngine, EngineConfig, HigressRAGEngine, build_llm
+from .engines import AAFLOWEngine, AAFLOWPlusEngine, EngineConfig, HigressRAGEngine, build_llm
 
 
 def _barrier(run_dir: Path, name: str, rank: int, world: int, poll_s: float = 0.1) -> None:
@@ -206,6 +206,7 @@ def main() -> int:
     engine_specs = [
         ("HigressRAG", lambda: HigressRAGEngine(name="HigressRAG", chunks=chunks, llm=higress_llm, config=config)),
         ("AAFLOW", lambda: AAFLOWEngine(chunks=chunks, llm=agentic_llm, config=config)),
+        ("AAFLOW+", lambda: AAFLOWPlusEngine(chunks=chunks, llm=agentic_llm, config=config)),
     ]
     wanted = {item.strip() for item in args.engine_filter.split(",") if item.strip()}
     engine_specs = [item for item in engine_specs if not wanted or item[0] in wanted]
@@ -219,11 +220,11 @@ def main() -> int:
             for engine in engines:
                 engine.warm_cache(warm_cases)
             for scenario, cases in query_sets.items():
-                for case in cases:
-                    for engine in engines:
-                        row = asdict(engine.run_query(scenario, case))
-                        row["repeat_index"] = repeat_index
-                        local_query_rows.append(row)
+                for engine in engines:
+                    for row in engine.run_queries(scenario, cases):
+                        payload = asdict(row)
+                        payload["repeat_index"] = repeat_index
+                        local_query_rows.append(payload)
 
     rank_results_dir = output_dir / "rank_results"
     rank_results_dir.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,6 @@
 # Higress vs AAFLOW Benchmark
 
-This directory contains a standalone benchmark that compares `HigressRAG` and `AAFLOW(AAFLOW)` on local corpora.
+This directory contains a standalone benchmark that compares `HigressRAG`, `AAFLOW`, and `AAFLOW+` on local corpora.
 
 ## Current Implementation
 
@@ -28,7 +28,7 @@ The current validated path is:
 The current FAISS overlap benchmark is overlap-oriented, not neutral.
 
 It does two things deliberately:
-- `AAFLOW(AAFLOW)` uses the thinner overlap path
+- `AAFLOW` uses the thinner overlap path
 - `HigressRAG` pays modeled non-Agentic dispatch overhead in `fair_parallelism_plus_overlap`
 
 This is intentional. The benchmark is designed to measure whether an agentic overlap-oriented path can materially outperform a thinner serial RAG path under FAISS.
@@ -38,7 +38,7 @@ If you need a neutral benchmark, do not use this profile.
 ## Layout
 
 - `common.py`: corpus loading, chunking, retrieval, semantic cache, metrics
-- `engines.py`: `HigressRAG` and `AAFLOW` engines
+- `engines.py`: `HigressRAG`, `AAFLOW`, and `AAFLOW+` engines
 - `run_benchmark.py`: local CLI
 - `distributed_higress_benchmark.py`: distributed Slurm-task benchmark with repeat/median aggregation
 - `run_higress_benchmark.slurm`: distributed Slurm launcher
@@ -104,9 +104,9 @@ Validated output:
 - `drc_rag/higress_agentic_benchmark/test_outputs_faiss_overlap_local_sanity3`
 
 Observed local sanity result:
-- `AAFLOW(AAFLOW) llm_generation total_ms_avg = 36.66`
+- `AAFLOW llm_generation total_ms_avg = 36.66`
 - `HigressRAG llm_generation total_ms_avg = 76.88`
-- `AAFLOW(AAFLOW)` is about `52.3%` faster on that scenario
+- `AAFLOW` is about `52.3%` faster on that scenario
 
 ## Distributed Slurm Usage
 
@@ -176,9 +176,24 @@ Median results from `summary.csv`:
 | `HigressRAG` | `retrieval_hybrid` | `20.30` |
 
 Interpretation:
-- `AAFLOW(AAFLOW)` exceeds the `30%` target under the current FAISS overlap benchmark semantics
+- `AAFLOW` exceeds the `30%` target under the current FAISS overlap benchmark semantics
 - on `llm_generation`, `AAFLOW` is about `59.8%` faster than `HigressRAG`
 - on `non_cached_complex_query`, `AAFLOW` is about `58.5%` faster than `HigressRAG`
+
+AAFLOW+ implementation status:
+- `11978502`
+- output directory:
+  - `drc_rag/higress_agentic_benchmark/slurm_runs/11978502/`
+
+Observed median results:
+- `AAFLOW+ llm_generation total_ms_avg = 26.85`
+- `AAFLOW+ non_cached_complex_query total_ms_avg = 28.29`
+- `AAFLOW+ retrieval_hybrid total_ms_avg = 0.15`
+
+Interpretation:
+- the final `AAFLOW+` patch keeps Arrow on the batched retrieval/context side and removes Arrow from the memory-store path
+- `AAFLOW+` reaches practical parity with `AAFLOW` in this latency-oriented benchmark
+- `AAFLOW+` should be treated as an implemented parity variant here, not the headline benchmark result
 
 Previous validated run kept for reference:
 - `11141981`

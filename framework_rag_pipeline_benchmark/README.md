@@ -303,16 +303,31 @@ Output folder:
 - `drc_rag/framework_rag_pipeline_benchmark/slurm_runs/11787868/`
 
 Observed summary:
-- `AAFLOW(AAFLOW)`: `total_s=0.916`, `load_s=0.024`, `transform_s=0.015`, `embed_s=0.492`, `upsert_s=0.072`
+- `AAFLOW`: `total_s=0.916`, `load_s=0.024`, `transform_s=0.015`, `embed_s=0.492`, `upsert_s=0.072`
 - `LangGraph`: `total_s=1.641`, `embed_s=1.149`, `upsert_s=0.137`
 - `AutoGen`: `total_s=1.647`, `embed_s=1.154`, `upsert_s=0.157`
 - `CrewAI`: `total_s=1.653`, `embed_s=1.161`, `upsert_s=0.141`
 - `LangChain`: `total_s=1.661`, `embed_s=1.155`, `upsert_s=0.161`
 
+Arrow boundary rerun of the same configuration:
+- `11978368`
+
+Output folder:
+- `drc_rag/framework_rag_pipeline_benchmark/slurm_runs/11978368/`
+
+Observed summary:
+- `AAFLOW+`: `total_s=0.880`, `load_s=0.011`, `transform_s=0.010`, `embed_s=0.491`, `upsert_s=0.056`
+- `AAFLOW`: `total_s=0.893`, `load_s=0.012`, `transform_s=0.010`, `embed_s=0.491`, `upsert_s=0.063`
+- `LangGraph`: `total_s=1.613`
+- `AutoGen`: `total_s=1.613`
+- `CrewAI`: `total_s=1.624`
+- `LangChain`: `total_s=1.636`
+
 Interpretation:
 - `11787868` confirms that the `11140904` Slurm configuration is still valid.
-- `AAFLOW(AAFLOW)` remains the fastest framework in the distributed FAISS overlap profile.
-- `11140904` remains the best observed run for this exact configuration.
+- `11978368` validates `AAFLOW+`, where Arrow is used only at the embed/upsert boundary.
+- `AAFLOW+` is the fastest framework in this profile, about `1.4%` faster than `AAFLOW`.
+- `11140904` remains the best historical `AAFLOW` run, while `11978368` is the current `AAFLOW+` reference.
 
 ## Notes
 
