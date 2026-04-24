@@ -102,6 +102,48 @@ PY
 
 ## Main Experiments
 
+### 0. Datasets and Input
+The artifact uses Huggingface wikitext2 datasets and generated workloads. Workloads include small-scale and large-scale chunked corpora.
+Use \texttt{download\_hf\_dataset.py} for both train and eval. If datasets is missing, execute pip install datasets.
+
+To generate data/wikitext2_train
+
+```bash
+$ cd AAFLOW
+
+$ python download_hf_dataset.py
+  --dataset_name wikitext
+  --subset_name wikitext-2-raw-v1
+  --split train
+  --output_dir data/wikitext2_train
+
+```
+To generate data/wikitext_eval
+
+```bash
+
+$ cd AAFLOW
+$ python download_hf_dataset.py
+  --dataset_name wikitext
+  --subset_name wikitext-2-raw-v1
+  --split test
+  --output_dir data/wikitext_eval
+```
+
+To generate an optional smaller eval set
+```bash
+
+$ cd AAFLOW
+
+$ python download_hf_dataset.py
+  --dataset_name wikitext
+  --subset_name wikitext-2-raw-v1
+  --split test
+  --max_samples 1000
+  --output_dir data/wikitext_eval
+```
+
+
 ### 1. Scaling Benchmark
 
 Directory:
