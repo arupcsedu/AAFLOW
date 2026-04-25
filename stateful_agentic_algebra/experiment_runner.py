@@ -16,7 +16,9 @@ produce skipped or fallback records instead of CLI crashes.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
+import io
 import json
 import traceback
 from dataclasses import asdict
@@ -24,6 +26,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from .baselines import BaselineResult, get_baselines, list_baselines as list_adapter_baselines
+from .hf_kv_backend import HFBackendConfig, HFKVBackend
 from .metrics_stateful import METRIC_FIELDS
 from .runtime import RuntimeConfig, StatefulRuntime
 from .workloads import (
@@ -83,12 +86,13 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument("--agent-grid", type=str, default="")
     parser.add_argument("--branch-grid", type=str, default="")
     parser.add_argument("--output-dir", type=str, default="runs/stateful/latest")
+    parser.add_argument("--backend", choices=["mock", "hf"], default="mock", help="Execution backend for ours_stateful")
 
     # Backwards-compatible aliases from the earlier runner.
     parser.add_argument("--branches", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--shared-prefix-tokens", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--output-json", type=str, default="", help=argparse.SUPPRESS)
-    parser.add_argument("--generation-backend", choices=["mock", "aaflow", "vllm", "sglang"], default="mock", help=argparse.SUPPRESS)
+    parser.add_argument("--generation-backend", choices=["mock", "aaflow", "vllm", "sglang", "hf"], default="mock", help=argparse.SUPPRESS)
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     if args.branches is not None:
@@ -98,6 +102,8 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
         args.context_tokens = args.shared_prefix_tokens
     if args.output_json and args.output_dir == "runs/stateful/latest":
         args.output_dir = str(Path(args.output_json).parent or Path("."))
+    if args.generation_backend == "hf":
+        args.backend = "hf"
     return args
 
 
@@ -152,6 +158,7 @@ def run_experiment(args: argparse.Namespace) -> dict[str, Any]:
                             requested_config=cfg,
                             run_id=run_id,
                             generation_backend=args.generation_backend,
+                            backend=args.backend,
                         )
                         if row_or_skip.get("skipped"):
                             skipped.append(row_or_skip)
@@ -189,11 +196,15 @@ def _run_one(
     requested_config: WorkloadConfig,
     run_id: str,
     generation_backend: str,
+    backend: str,
 ) -> dict[str, Any]:
     cfg = workload.config.normalized()
     try:
         if baseline_name == "ours_stateful":
-            return _run_ours_stateful(workload, requested_config, run_id, generation_backend)
+            if backend == "hf":
+                with contextlib.redirect_stdout(io.StringIO()):
+                    return _run_ours_stateful(workload, requested_config, run_id, generation_backend, backend)
+            return _run_ours_stateful(workload, requested_config, run_id, generation_backend, backend)
 
         baseline = _baseline_by_name(baseline_name)
         if baseline is None:
@@ -228,8 +239,12 @@ def _run_ours_stateful(
     requested_config: WorkloadConfig,
     run_id: str,
     generation_backend: str,
+    backend: str,
 ) -> dict[str, Any]:
     cfg = workload.config.normalized()
+    if backend == "hf":
+        return _run_ours_hf(workload, requested_config, run_id)
+
     runtime = StatefulRuntime(
         config=RuntimeConfig(generation_backend=generation_backend, model_id=cfg.model_id, tokenizer_id=cfg.tokenizer_id, mock_tokens_per_answer=cfg.output_tokens)
     )
@@ -259,6 +274,46 @@ def _run_ours_stateful(
         available=True,
         reason="",
     )
+
+
+def _run_ours_hf(workload: GeneratedWorkload, requested_config: WorkloadConfig, run_id: str) -> dict[str, Any]:
+    cfg = workload.config.normalized()
+    model_id = cfg.model_id if cfg.model_id != "mock-model" else "distilgpt2"
+    tokenizer_id = cfg.tokenizer_id if cfg.tokenizer_id != "mock-tokenizer" else model_id
+    backend = HFKVBackend(HFBackendConfig(model_id=model_id, tokenizer_id=tokenizer_id))
+    measurements = []
+    for request_idx in range(cfg.num_requests):
+        prompt = workload.prompts[request_idx % len(workload.prompts)] if workload.prompts else cfg.workload_name
+        token_count = workload.token_counts[request_idx % len(workload.token_counts)] if workload.token_counts else cfg.context_tokens
+        measurements.append(backend.measure(prompt, context_tokens=token_count, output_tokens=cfg.output_tokens))
+
+    metrics = _combine_metrics([measurement.metrics for measurement in measurements])
+    if measurements:
+        metrics["kv_total_bytes"] = max(measurement.kv_state.total_bytes() for measurement in measurements)
+        metrics["kv_peak_bytes"] = metrics["kv_total_bytes"]
+        metrics["context_tokens"] = max(int(measurement.metrics.get("context_tokens", 0)) for measurement in measurements)
+        metrics["output_tokens"] = sum(int(measurement.metrics.get("output_tokens", 0)) for measurement in measurements)
+
+    row = _row_from_metrics(
+        metrics=metrics,
+        baseline_name="ours_stateful",
+        baseline_label=f"{OURS_BASELINE['label']} (HF)",
+        workload=workload,
+        requested_config=requested_config,
+        run_id=run_id,
+        metadata={
+            "backend": "hf",
+            "model_id": model_id,
+            "kv_states": [measurement.kv_state.to_json_dict() for measurement in measurements],
+            "generated_texts": [measurement.generated_text for measurement in measurements],
+        },
+        available=True,
+        reason="",
+    )
+    row["model_id"] = model_id
+    row["tokenizer_id"] = tokenizer_id
+    row["context_tokens"] = int(metrics.get("context_tokens", row["context_tokens"]))
+    return row
 
 
 def _row_from_metrics(

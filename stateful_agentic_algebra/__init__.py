@@ -74,6 +74,16 @@ _AAFLOW_ADAPTER_EXPORTS = {
     "load_existing_metrics",
     "run_existing_rag_agent_if_available",
 }
+_HF_BACKEND_EXPORTS = {"HFBackendConfig", "HFDecodeResult", "HFMeasurement", "HFPrefillResult", "HFKVBackend"}
+_VLLM_BACKEND_EXPORTS = {"VLLMBackend", "VLLMBackendConfig", "VLLMRunResult"}
+_VLLM_BENCHMARK_EXPORTS = {
+    "check_vllm_available",
+    "launch_vllm_server",
+    "parse_vllm_results",
+    "run_vllm_bench_serve",
+    "wait_for_server",
+}
+_MODEL_REGISTRY_EXPORTS = {"ModelSpec", "default_model_registry", "get_model_spec", "list_models", "model_availability"}
 
 
 def __getattr__(name: str):
@@ -97,6 +107,30 @@ def __getattr__(name: str):
         value = getattr(aaflow_adapter, name)
         globals()[name] = value
         return value
+    if name in _HF_BACKEND_EXPORTS:
+        from . import hf_kv_backend
+
+        value = getattr(hf_kv_backend, name)
+        globals()[name] = value
+        return value
+    if name in _VLLM_BACKEND_EXPORTS:
+        from . import vllm_backend
+
+        value = getattr(vllm_backend, name)
+        globals()[name] = value
+        return value
+    if name in _VLLM_BENCHMARK_EXPORTS:
+        from . import vllm_benchmark
+
+        value = getattr(vllm_benchmark, name)
+        globals()[name] = value
+        return value
+    if name in _MODEL_REGISTRY_EXPORTS:
+        from . import model_registry
+
+        value = getattr(model_registry, name)
+        globals()[name] = value
+        return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -115,6 +149,11 @@ __all__ = [
     "ExecutionPlan",
     "ForkOperator",
     "GeneratedWorkload",
+    "HFBackendConfig",
+    "HFDecodeResult",
+    "HFMeasurement",
+    "HFPrefillResult",
+    "HFKVBackend",
     "KVBlock",
     "KVForkOperator",
     "KVEvictOperator",
@@ -127,6 +166,7 @@ __all__ = [
     "METRIC_FIELDS",
     "MaterializeOperator",
     "MergeSummary",
+    "ModelSpec",
     "MetricEvent",
     "MockTransport",
     "NodeSpec",
@@ -153,12 +193,24 @@ __all__ = [
     "TransportConfig",
     "UCXTransport",
     "VLLMLocalPrefixBaseline",
+    "VLLMBackend",
+    "VLLMBackendConfig",
+    "VLLMRunResult",
     "WorkloadConfig",
     "WorkflowState",
     "aggregate_runs",
+    "check_vllm_available",
+    "default_model_registry",
     "export_in_aaflow_style",
+    "get_model_spec",
     "get_baselines",
     "list_baselines",
+    "list_models",
     "load_existing_metrics",
+    "model_availability",
+    "launch_vllm_server",
+    "parse_vllm_results",
     "run_existing_rag_agent_if_available",
+    "run_vllm_bench_serve",
+    "wait_for_server",
 ]

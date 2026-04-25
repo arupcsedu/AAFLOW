@@ -26,6 +26,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from .runtime import RuntimeMetrics
 from .scheduler import CostModel, StateAwareScheduler
 from .state_objects import OperatorSpec, OperatorType
+from .vllm_backend import VLLMBackend
 from .workloads import QueryWorkload, WorkloadConfig, synthetic_branching_workload
 
 
@@ -295,7 +296,7 @@ class VLLMLocalPrefixBaseline(BaselineAdapter):
     label = "vLLM Local Prefix Baseline"
 
     def available(self) -> bool:
-        return importlib.util.find_spec("vllm") is not None
+        return VLLMBackend.available()
 
     def unavailable_reason(self) -> str:
         return "vLLM is not installed; using mock local-prefix simulation when run"
