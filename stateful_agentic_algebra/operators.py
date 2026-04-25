@@ -88,7 +88,7 @@ class TransferOperator(AlgebraOperator):
         source_id = _resolve_kv_id(state, self.spec.inputs[0])
         target = str(self.spec.params.get("target", "remote"))
         source = runtime.kv.get(source_id)
-        transfer = runtime.transport.transfer(source.owner, target, source.bytes_size)
+        transfer = runtime.transport.transfer(source.owner_node, target, source.total_bytes())
         kv = runtime.kv.transfer(source_id, target, transfer.transfer_cost_ms)
         state.kv_states[kv.state_id] = kv
         return OperatorResult(

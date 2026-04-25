@@ -12,10 +12,12 @@ paths so the package remains importable in plain Python environments.
 """
 
 from .state_objects import (
+    KVBlock,
     KVState,
     KVStateStatus,
     OperatorSpec,
     OperatorType,
+    StateCompatibilityError,
     WorkflowState,
 )
 from .operators import (
@@ -36,6 +38,7 @@ __all__ = [
     "EvictOperator",
     "ExecutionPlan",
     "ForkOperator",
+    "KVBlock",
     "KVState",
     "KVStateStatus",
     "MaterializeOperator",
@@ -45,7 +48,7 @@ __all__ = [
     "RuntimeConfig",
     "StatefulAgenticRuntime",
     "StatefulMetricsRecorder",
+    "StateCompatibilityError",
     "TransferOperator",
     "WorkflowState",
 ]
-

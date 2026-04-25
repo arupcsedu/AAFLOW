@@ -108,7 +108,8 @@ class StatefulAgenticRuntime:
 
     def generate(self, prompt: str, kv_state_id: Optional[str] = None) -> str:
         if kv_state_id and kv_state_id in self.kv.states:
-            self.kv.states[kv_state_id].reuse_count += 1
+            state = self.kv.states[kv_state_id]
+            state.metadata["reuse_count"] = int(state.metadata.get("reuse_count", 0)) + 1
             self.metrics.mark_kv_reuse()
         if self.aaflow_agent is not None and hasattr(self.aaflow_agent, "llm"):
             llm = getattr(self.aaflow_agent, "llm")

@@ -1,7 +1,6 @@
 # Stateful Agentic Algebra
 
-This package adds a standalone experimental layer for **Stateful Agentic
-Algebra** without rewriting the existing AAFLOW pipeline.
+This package adds a standalone experimental layer for **Stateful Agentic Algebra** without rewriting the existing AAFLOW pipeline.
 
 It can reuse AAFLOW components when they are already constructed, but every
 heavy dependency is optional. If vLLM, SGLang, UCX, NCCL, CUDA, FAISS, Chroma,
