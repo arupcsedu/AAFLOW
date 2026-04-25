@@ -20,6 +20,6 @@ dependencies:
       - distributed>=2024.8,<2027
       - langchain-core>=0.3,<1
       - langgraph>=0.2,<1
-        - crewai>=0.130,<1
-        - pyautogen>=0.2,<1
-        - autogen>=0.12,<1
+      - crewai>=0.130,<1
+      - pyautogen>=0.2,<1
+      - autogen>=0.12,<1
