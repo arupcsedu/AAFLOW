@@ -37,7 +37,7 @@ module adds a separate state-aware layer on top:
 - `aaflow_adapter.py` optionally imports existing AAFLOW metrics and agent
   components when available.
 - `AAFLOWTextBaseline` represents AAFLOW-style text passing, while
-  `ours_stateful` introduces explicit KV lifecycle operations.
+  `AAFLOW+` introduces explicit KV lifecycle operations.
 - If AAFLOW imports fail, the module remains usable in standalone mock mode.
 
 ## Quick Start
@@ -60,6 +60,82 @@ Expected terminal message:
 
 ```text
 STATEFUL AAFLOW SMOKE TEST PASSED
+```
+
+## Mock LLM Tests
+
+Mock mode is the default path for validating the Stateful Agentic Algebra code
+without downloading models or requiring GPUs. It uses deterministic synthetic
+token counts, simulated KV bytes, and the same metric schema used by real-model
+runs.
+
+Use the project benchmark environment:
+
+```bash
+cd /project/bi_dsc_community/drc_rag
+export PYTHON_BIN=/scratch/djy8hg/env/saa_vllm_env/bin/python
+export PYTHONPATH="$PWD:${PYTHONPATH:-}"
+```
+
+On this cluster, CUDA Python wheels may need their packaged NVIDIA libraries in
+`LD_LIBRARY_PATH`, even for import checks:
+
+```bash
+export LD_LIBRARY_PATH="$($PYTHON_BIN - <<'PY'
+import site
+from pathlib import Path
+roots = [Path(p) for p in site.getsitepackages()]
+try:
+    roots.append(Path(site.getusersitepackages()))
+except Exception:
+    pass
+print(":".join(str(p) for root in roots for p in root.glob("nvidia/*/lib") if p.is_dir()))
+PY
+):${LD_LIBRARY_PATH:-}"
+```
+
+Run the smoke test:
+
+```bash
+$PYTHON_BIN -m stateful_agentic_algebra.smoke_test
+```
+
+Run all mock baselines on a small grid:
+
+```bash
+$PYTHON_BIN -m stateful_agentic_algebra.experiment_runner \
+  --all-baselines \
+  --all-workloads \
+  --context-grid 1024,4096 \
+  --agent-grid 2,4 \
+  --branch-grid 2 \
+  --output-tokens 64 \
+  --num-requests 3 \
+  --output-dir runs/stateful/mock_llm_test
+```
+
+Expected files:
+
+```text
+runs/stateful/mock_llm_test/results.csv
+runs/stateful/mock_llm_test/results.json
+runs/stateful/mock_llm_test/config.json
+runs/stateful/mock_llm_test/skipped_baselines.json
+runs/stateful/mock_llm_test/benchmark.out
+```
+
+The main mock paper-style run used in this repository is:
+
+```bash
+$PYTHON_BIN -m stateful_agentic_algebra.experiment_runner \
+  --all-baselines \
+  --all-workloads \
+  --context-grid 1024,4096,8192 \
+  --agent-grid 2,4,8 \
+  --branch-grid 2,4 \
+  --output-tokens 64 \
+  --num-requests 5 \
+  --output-dir runs/stateful/all_baselines_mock
 ```
 
 ## Config-Driven Runs
@@ -92,10 +168,75 @@ The config files define:
 
 ## Real LLM Runs
 
+The current real-LLM benchmark environment is:
+
+```bash
+export PYTHON_BIN=/scratch/djy8hg/env/saa_vllm_env/bin/python
+```
+
+`/scratch/djy8hg/env/saa_vllm_env/bin/python` is the Python used by the Slurm
+scripts. It currently points to the benchmark environment under
+`/scratch/djy8hg/env/drc_rag_bench_env`, so use `PYTHON_BIN` rather than plain
+`python` in shell commands and batch scripts.
+
+Recommended shell setup:
+
+```bash
+cd /project/bi_dsc_community/drc_rag
+export PYTHON_BIN=/scratch/djy8hg/env/saa_vllm_env/bin/python
+export PYTHONPATH="$PWD:${PYTHONPATH:-}"
+export PYTHONNOUSERSITE=1
+```
+
+Add packaged NVIDIA wheel libraries:
+
+```bash
+export LD_LIBRARY_PATH="$($PYTHON_BIN - <<'PY'
+import site
+from pathlib import Path
+roots = [Path(p) for p in site.getsitepackages()]
+try:
+    roots.append(Path(site.getusersitepackages()))
+except Exception:
+    pass
+print(":".join(str(p) for root in roots for p in root.glob("nvidia/*/lib") if p.is_dir()))
+PY
+):${LD_LIBRARY_PATH:-}"
+```
+
+Verify imports:
+
+```bash
+$PYTHON_BIN - <<'PY'
+import importlib
+for name in ["torch", "transformers", "vllm", "sglang"]:
+    try:
+        mod = importlib.import_module(name)
+        print(name, "ok", getattr(mod, "__version__", "unknown"))
+    except Exception as exc:
+        print(name, "failed", type(exc).__name__, exc)
+PY
+```
+
+Install or refresh the environment only from a GPU/login shell where large wheel
+downloads are acceptable:
+
+```bash
+$PYTHON_BIN -m pip install -U pip
+$PYTHON_BIN -m pip install pytest
+$PYTHON_BIN -m pip install vllm
+$PYTHON_BIN -m pip install sglang
+```
+
+SGLang and vLLM can require different pinned versions of `torch`,
+`transformers`, FlashInfer, and related CUDA packages. For production real-LLM
+serving sweeps, separate vLLM-only and SGLang-only environments are cleaner.
+The mock experiments do not depend on either package importing successfully.
+
 Hugging Face KV microbenchmark:
 
 ```bash
-python -m stateful_agentic_algebra.hf_kv_backend \
+$PYTHON_BIN -m stateful_agentic_algebra.hf_kv_backend \
   --model-id gpt2 \
   --context-tokens 512 \
   --output-tokens 32 \
@@ -106,7 +247,7 @@ python -m stateful_agentic_algebra.hf_kv_backend \
 vLLM serving benchmark:
 
 ```bash
-python -m stateful_agentic_algebra.vllm_benchmark \
+$PYTHON_BIN -m stateful_agentic_algebra.vllm_benchmark \
   --model-id meta-llama/Meta-Llama-3-8B-Instruct \
   --input-len 4096 \
   --output-len 128 \
@@ -119,14 +260,60 @@ python -m stateful_agentic_algebra.vllm_benchmark \
 Multi-model sweep:
 
 ```bash
-python -m stateful_agentic_algebra.multi_llm_runner \
+$PYTHON_BIN -m stateful_agentic_algebra.multi_llm_runner \
   --config stateful_agentic_algebra/configs/real_llm_full_paper.yaml
+```
+
+Slurm multi-model sweep:
+
+```bash
+export MODEL_ID='gpt2'
+export BACKEND='hf'
+export CONTEXT_GRID='512'
+export OUTPUT_GRID='64'
+export NUM_PROMPTS='4'
+sbatch --export=ALL stateful_agentic_algebra/slurm/run_real_llm_sweep.sbatch
+```
+
+For comma-separated grids, always export variables first so Slurm does not split
+`--export` values on commas:
+
+```bash
+export MODEL_ID='gpt2,mistralai/Mistral-7B-Instruct-v0.3'
+export BACKEND='hf,vllm'
+export CONTEXT_GRID='512,960'
+export OUTPUT_GRID='64'
+export NUM_PROMPTS='8'
+sbatch --export=ALL stateful_agentic_algebra/slurm/run_real_llm_sweep.sbatch
 ```
 
 Gated Hugging Face models require access approval and:
 
 ```bash
 export HUGGINGFACE_HUB_TOKEN=<your_token>
+```
+
+Large model weights should be cached on scratch or another high-capacity
+filesystem instead of the default home-directory cache. Set these variables in
+the same shell before running HF or vLLM benchmarks:
+
+```bash
+export HF_HOME=/scratch/$USER/huggingface
+export HUGGINGFACE_HUB_CACHE=/scratch/$USER/huggingface/hub
+export TRANSFORMERS_CACHE=/scratch/$USER/huggingface/transformers
+mkdir -p "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE"
+```
+
+Without these variables, Hugging Face typically downloads models under:
+
+```text
+~/.cache/huggingface/hub/
+```
+
+Check current cache usage with:
+
+```bash
+du -sh "$HF_HOME" 2>/dev/null || du -sh ~/.cache/huggingface 2>/dev/null
 ```
 
 ## Plot Generation
@@ -153,7 +340,7 @@ and PDF.
 
 ## Baselines
 
-- `ours_stateful`: the proposed Stateful Agentic Algebra runtime with explicit
+- `AAFLOW+`: the proposed Stateful Agentic Algebra runtime with explicit
   KV materialize, transfer, fork, merge, and evict operations.
 - `dense_prefill`: synthetic dense prefill/text-passing baseline where every
   agent independently pays context prefill and has no KV reuse.
@@ -161,8 +348,9 @@ and PDF.
   LLM generator paths when importable; otherwise it falls back or skips.
 - `vllm_local_prefix`: optional vLLM/local-prefix baseline. If vLLM is missing,
   it is skipped or simulated depending on the runner path.
-- `sglang_prefix`: optional SGLang prefix baseline. If SGLang is missing, it is
-  skipped with a clear reason.
+- `sglang_prefix`: optional SGLang prefix baseline. If SGLang is installed, it
+  is labeled as SGLang-backed; if not, the runner emits simulated SGLang-prefix
+  metrics with a clear reason instead of dropping all rows.
 - `distserve_style`: simulated disaggregated prefill/decode baseline. It is
   labeled as DistServe-style simulation, not an exact DistServe implementation.
 
@@ -233,11 +421,14 @@ Plotting:
 ## Troubleshooting Optional Dependencies
 
 - Missing vLLM: vLLM benchmarks are skipped unless `--require-vllm` is used.
-- Missing SGLang: `sglang_prefix` is skipped.
+- Missing SGLang: `sglang_prefix` falls back to simulated prefix metrics.
 - Missing Hugging Face packages: mock mode still works; install
   `transformers`, `torch`, and `huggingface_hub` for HF runs.
 - Gated model access: request access on Hugging Face and export
   `HUGGINGFACE_HUB_TOKEN`.
+- Hugging Face cache fills home storage: set `HF_HOME`,
+  `HUGGINGFACE_HUB_CACHE`, and `TRANSFORMERS_CACHE` to a scratch path before
+  downloading large models.
 - CUDA OOM: reduce context length/output length/request count, use a smaller
   model, or increase tensor parallelism.
 - UCX/NCCL unavailable: transport falls back to mock/local simulation.

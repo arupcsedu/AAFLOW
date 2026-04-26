@@ -179,6 +179,23 @@ export HUGGINGFACE_HUB_TOKEN=<your_token>
 
 `HF_TOKEN` may also be used by Hugging Face tooling.
 
+Set Hugging Face cache directories to scratch before downloading large models.
+If these variables are not set, model weights usually download under
+`~/.cache/huggingface/hub/`, which may fill home storage.
+
+```bash
+export HF_HOME=/scratch/$USER/huggingface
+export HUGGINGFACE_HUB_CACHE=/scratch/$USER/huggingface/hub
+export TRANSFORMERS_CACHE=/scratch/$USER/huggingface/transformers
+mkdir -p "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE"
+```
+
+Check usage:
+
+```bash
+du -sh "$HF_HOME" 2>/dev/null || du -sh ~/.cache/huggingface 2>/dev/null
+```
+
 ### HF KV Microbenchmark
 
 ```bash
@@ -272,7 +289,7 @@ Recommended workflow:
 
 ## Baselines
 
-- `ours_stateful`: proposed stateful KV runtime.
+- `AAFLOW+`: proposed stateful KV runtime.
 - `dense_prefill`: synthetic text-passing baseline with no KV reuse.
 - `aaflow_text`: optional AAFLOW text baseline.
 - `vllm_local_prefix`: optional vLLM local-prefix baseline.
@@ -308,6 +325,9 @@ The primary output metrics are:
 - Missing vLLM: install vLLM in a GPU-compatible environment or skip vLLM rows.
 - Gated model access: request access on Hugging Face and set
   `HUGGINGFACE_HUB_TOKEN`.
+- Hugging Face cache fills home storage: set `HF_HOME`,
+  `HUGGINGFACE_HUB_CACHE`, and `TRANSFORMERS_CACHE` to a scratch path before
+  model download.
 - Tokenizer mismatch: use the tokenizer paired with the model.
 - Unsupported KV export: vLLM KV export/import is intentionally a placeholder
   when no stable public API is available.

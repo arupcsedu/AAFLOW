@@ -1,5 +1,5 @@
 baselines:
-  - ours_stateful
+  - AAFLOW+
   - dense_prefill
 workloads:
   - tree_of_thought

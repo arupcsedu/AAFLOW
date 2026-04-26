@@ -41,7 +41,7 @@ def test_load_existing_metrics_missing_path_is_standalone_safe(tmp_path):
 def test_export_in_aaflow_style_writes_summary_and_latency_files(tmp_path):
     rows = [
         {
-            "baseline_name": "ours_stateful",
+            "baseline_name": "AAFLOW+",
             "workload_name": "tree_of_thought",
             "ttft_sec": 0.1,
             "total_latency_sec": 0.4,

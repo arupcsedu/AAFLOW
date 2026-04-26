@@ -50,7 +50,7 @@ Expected:
 - terminal output `STATEFUL AAFLOW SMOKE TEST PASSED`
 - JSON/CSV results and at least one generated plot
 
-The smoke test runs `ours_stateful` and `dense_prefill` in mock mode, plus
+The smoke test runs `AAFLOW+` and `dense_prefill` in mock mode, plus
 optional baselines when they are available.
 
 ## Full Paper Experiments
@@ -130,7 +130,7 @@ Real LLM figures include:
 
 | Baseline | Meaning |
 | --- | --- |
-| `ours_stateful` | Proposed stateful runtime with explicit KV lifecycle operations. |
+| `AAFLOW+` | Proposed stateful runtime with explicit KV lifecycle operations. |
 | `dense_prefill` | Synthetic dense prefill/text-passing baseline; every agent recomputes the context. |
 | `aaflow_text` | Optional AAFLOW text-passing adapter using AAFLOW agents/metrics when importable. |
 | `vllm_local_prefix` | Optional local-prefix reuse baseline through vLLM; skipped when vLLM is missing. |
@@ -227,3 +227,25 @@ The recommended workflow is:
 
 Keep `config.json`, logs, raw CSVs, and version information with the generated
 figures for reproducibility.
+
+Before downloading large Hugging Face models, move the cache away from home
+storage:
+
+```bash
+export HF_HOME=/scratch/$USER/huggingface
+export HUGGINGFACE_HUB_CACHE=/scratch/$USER/huggingface/hub
+export TRANSFORMERS_CACHE=/scratch/$USER/huggingface/transformers
+mkdir -p "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE"
+```
+
+If these are unset, downloads normally go to:
+
+```text
+~/.cache/huggingface/hub/
+```
+
+Check cache usage with:
+
+```bash
+du -sh "$HF_HOME" 2>/dev/null || du -sh ~/.cache/huggingface 2>/dev/null
+```

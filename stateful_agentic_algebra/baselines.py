@@ -327,7 +327,13 @@ class VLLMLocalPrefixBaseline(BaselineAdapter):
 
 
 class SGLangPrefixBaseline(BaselineAdapter):
-    """Optional SGLang prefix reuse baseline."""
+    """SGLang prefix reuse baseline with a mock-safe fallback.
+
+    When SGLang is installed, this adapter labels the run as SGLang-backed and
+    leaves room for a future real serving call. When it is unavailable, the
+    same prefix-reuse cost model is emitted as a simulation row instead of a
+    skipped row so all-baseline sweeps still include `sglang_prefix`.
+    """
 
     name = "sglang_prefix"
     label = "SGLang Prefix Baseline"
@@ -336,12 +342,10 @@ class SGLangPrefixBaseline(BaselineAdapter):
         return importlib.util.find_spec("sglang") is not None
 
     def unavailable_reason(self) -> str:
-        return "SGLang is not installed"
+        return "SGLang is not installed; using simulated SGLang prefix metrics"
 
     def run_workload(self, workload_config: WorkloadConfig | QueryWorkload | dict[str, Any] | None) -> BaselineResult:
-        if not self.available():
-            return self._skip(self.unavailable_reason())
-
+        available = self.available()
         cfg = self._normalize(workload_config)
         scheduler = StateAwareScheduler(cfg.cost_model)
         prefill = scheduler.estimate_prefill(cfg.context_tokens)
@@ -357,7 +361,16 @@ class SGLangPrefixBaseline(BaselineAdapter):
             kv_bytes=cfg.context_tokens * cfg.bytes_per_token,
             reuse_ratio=(cfg.num_agents - 1) / cfg.num_agents if cfg.num_agents else 0.0,
         )
-        return BaselineResult(self.label, metrics, metadata={"mode": "sglang_prefix"})
+        return BaselineResult(
+            self.label,
+            metrics,
+            available=available,
+            reason="" if available else self.unavailable_reason(),
+            metadata={
+                "mode": "sglang_prefix" if available else "mock_sglang_prefix",
+                "real_sglang_installed": available,
+            },
+        )
 
 
 class DistServeStyleBaseline(BaselineAdapter):
@@ -420,7 +433,7 @@ def list_baselines() -> list[dict[str, Any]]:
                 "name": baseline.name,
                 "label": baseline.label,
                 "available": available,
-                "skipped": not available and baseline.name == "sglang_prefix",
+                "skipped": False,
                 "reason": "" if available else baseline.unavailable_reason(),
             }
         )

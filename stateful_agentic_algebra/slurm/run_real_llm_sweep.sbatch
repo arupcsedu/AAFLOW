@@ -4,8 +4,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH -A bii_dsc_community
-#SBATCH --partition=gpu
-#SBATCH --gres=gpu:2
+#SBATCH --partition=bii-gpu
+#SBATCH --gres=gpu:v100:2
 #SBATCH --mem=192G
 #SBATCH --time=12:00:00
 #SBATCH --output=/project/bi_dsc_community/drc_rag/stateful_agentic_algebra/slurm/slurm-%x-%j.out

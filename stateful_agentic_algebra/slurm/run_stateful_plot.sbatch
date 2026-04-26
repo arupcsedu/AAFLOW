@@ -16,7 +16,7 @@ export SLURM_CPU_BIND=none
 PROJECT_ROOT="${PROJECT_ROOT:-/project/bi_dsc_community/drc_rag}"
 
 PYTHON_BIN="${PYTHON_BIN:-python}"
-BASELINE="${BASELINE:-ours_stateful}"
+BASELINE="${BASELINE:-AAFLOW+}"
 WORKLOAD="${WORKLOAD:-linear_handoff}"
 CONTEXT_TOKENS="${CONTEXT_TOKENS:-128}"
 OUTPUT_TOKENS="${OUTPUT_TOKENS:-16}"

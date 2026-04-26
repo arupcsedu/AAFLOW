@@ -48,13 +48,13 @@ def test_multi_llm_runner_dry_run_outputs_matrix_files(tmp_path):
     raw_rows = [json.loads(line) for line in (output_dir / "results_raw.jsonl").read_text(encoding="utf-8").splitlines()]
     assert len(raw_rows) == 6
     workloads = {row["workload_name"] for row in raw_rows}
-    assert {"ours_stateful", "dense_prefill", "vllm_serve"} <= workloads
+    assert {"AAFLOW+", "dense_prefill", "vllm_serve"} <= workloads
     assert all(row["model_id"] == "gpt2" for row in raw_rows)
 
     with (output_dir / "results.csv").open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     assert len(rows) == 6
-    ours = [row for row in rows if row["workload_name"] == "ours_stateful"][0]
+    ours = [row for row in rows if row["workload_name"] == "AAFLOW+"][0]
     dense = [row for row in rows if row["workload_name"] == "dense_prefill"][0]
     assert float(ours["kv_reuse_ratio"]) > float(dense["kv_reuse_ratio"])
 
@@ -132,3 +132,43 @@ def test_multi_llm_runner_accepts_yaml_config(tmp_path):
     payload = json.loads(proc.stdout)
     assert payload["rows"] == 2
     assert (output_dir / "results.csv").exists()
+
+
+def test_multi_llm_runner_skips_contexts_beyond_model_limit(tmp_path):
+    output_dir = tmp_path / "invalid_context"
+    proc = subprocess.run(
+        [
+            PYTHON,
+            "-m",
+            "stateful_agentic_algebra.multi_llm_runner",
+            "--models",
+            "gpt2",
+            "--backend",
+            "hf,vllm",
+            "--context-grid",
+            "1024",
+            "--output-grid",
+            "64",
+            "--agent-grid",
+            "2",
+            "--branch-grid",
+            "2",
+            "--num-prompts",
+            "1",
+            "--output-dir",
+            str(output_dir),
+            "--dry-run",
+        ],
+        cwd=CWD,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    payload = json.loads(proc.stdout)
+    assert payload["rows"] == 3
+    assert "skipped" in proc.stderr
+    raw_rows = [json.loads(line) for line in (output_dir / "results_raw.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert len(raw_rows) == 3
+    assert all(row["skipped"] is True for row in raw_rows)
+    assert all("exceeds max context" in row["reason"] for row in raw_rows)

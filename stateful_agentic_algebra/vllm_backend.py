@@ -52,9 +52,15 @@ class VLLMBackend:
 
     @staticmethod
     def available() -> bool:
-        """Return False when vLLM is not installed."""
+        """Return False when vLLM is not installed or cannot be imported."""
 
-        return importlib.util.find_spec("vllm") is not None
+        if importlib.util.find_spec("vllm") is None:
+            return False
+        try:
+            import vllm  # noqa: F401  # type: ignore
+        except Exception:
+            return False
+        return True
 
     def load(self) -> None:
         """Instantiate the vLLM engine lazily."""

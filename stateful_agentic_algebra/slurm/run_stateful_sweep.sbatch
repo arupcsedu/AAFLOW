@@ -25,6 +25,26 @@ BRANCH_FACTOR="${BRANCH_FACTOR:-2,4}"
 NUM_REQUESTS="${NUM_REQUESTS:-5}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_ROOT/runs/stateful/slurm_sweep/${SLURM_JOB_ID:-manual}}"
 
+NVIDIA_LIB_PATHS="$("$PYTHON_BIN" - <<'PY' 2>/dev/null || true
+import site
+from pathlib import Path
+roots = [Path(p) for p in site.getsitepackages()]
+try:
+    roots.append(Path(site.getusersitepackages()))
+except Exception:
+    pass
+paths = []
+for root in roots:
+    for path in root.glob("nvidia/*/lib"):
+        if path.is_dir():
+            paths.append(str(path))
+print(":".join(paths))
+PY
+)"
+if [[ -n "$NVIDIA_LIB_PATHS" ]]; then
+  export LD_LIBRARY_PATH="$NVIDIA_LIB_PATHS:${LD_LIBRARY_PATH:-}"
+fi
+
 mkdir -p "$OUTPUT_DIR"
 
 if ! command -v "$PYTHON_BIN" >/dev/null 2>&1 && [[ ! -x "$PYTHON_BIN" ]]; then

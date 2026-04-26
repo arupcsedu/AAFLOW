@@ -24,7 +24,7 @@ def test_list_baselines_includes_ours_and_optional_statuses():
     names = {item["name"] for item in payload["baselines"]}
 
     assert {
-        "ours_stateful",
+        "AAFLOW+",
         "dense_prefill",
         "aaflow_text",
         "vllm_local_prefix",
@@ -34,12 +34,12 @@ def test_list_baselines_includes_ours_and_optional_statuses():
     assert all("available" in item for item in payload["baselines"])
 
 
-def test_single_ours_stateful_run_writes_required_outputs(tmp_path):
+def test_single_aaflow_plus_run_writes_required_outputs(tmp_path):
     output_dir = tmp_path / "single"
 
     run_cli(
         "--baseline",
-        "ours_stateful",
+        "AAFLOW+",
         "--workload",
         "tree_of_thought",
         "--context-tokens",
@@ -64,14 +64,14 @@ def test_single_ours_stateful_run_writes_required_outputs(tmp_path):
 
     assert len(results) == 1
     assert skipped == []
-    assert results[0]["baseline_name"] == "ours_stateful"
+    assert results[0]["baseline_name"] == "AAFLOW+"
     assert results[0]["workload_name"] == "tree_of_thought"
     assert results[0]["num_requests"] == 2
 
     with (output_dir / "results.csv").open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     assert len(rows) == 1
-    assert rows[0]["baseline_name"] == "ours_stateful"
+    assert rows[0]["baseline_name"] == "AAFLOW+"
 
 
 def test_experiment_runner_accepts_yaml_config(tmp_path):
@@ -81,7 +81,7 @@ def test_experiment_runner_accepts_yaml_config(tmp_path):
         "\n".join(
             [
                 "baselines:",
-                "  - ours_stateful",
+                "  - AAFLOW+",
                 "  - dense_prefill",
                 "workloads:",
                 "  - linear_handoff",
@@ -107,13 +107,13 @@ def test_experiment_runner_accepts_yaml_config(tmp_path):
     assert payload["num_runs"] == 2
     assert (output_dir / "results.csv").exists()
     config = json.loads((output_dir / "config.json").read_text(encoding="utf-8"))
-    assert config["source_config"]["baselines"] == ["ours_stateful", "dense_prefill"]
-    assert config["resolved"]["baselines"] == ["ours_stateful", "dense_prefill"]
+    assert config["source_config"]["baselines"] == ["AAFLOW+", "dense_prefill"]
+    assert config["resolved"]["baselines"] == ["AAFLOW+", "dense_prefill"]
     with (output_dir / "results.csv").open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
-    assert {row["baseline_name"] for row in rows} == {"ours_stateful", "dense_prefill"}
+    assert {row["baseline_name"] for row in rows} == {"AAFLOW+", "dense_prefill"}
     assert all(row["backend_type"] == "mock" for row in rows)
-    assert all(row["configured_baselines"] == "ours_stateful,dense_prefill" for row in rows)
+    assert all(row["configured_baselines"] == "AAFLOW+,dense_prefill" for row in rows)
 
 
 def test_all_baselines_all_workloads_small_sweep_skips_missing_optional(tmp_path):
@@ -145,5 +145,5 @@ def test_all_baselines_all_workloads_small_sweep_skips_missing_optional(tmp_path
         "transfer_recompute_crossover",
         "tree_of_thought",
     }
-    assert all(row["baseline_name"] != "sglang_prefix" for row in results)
-    assert all(item["baseline_name"] == "sglang_prefix" for item in skipped)
+    assert any(row["baseline_name"] == "sglang_prefix" for row in results)
+    assert skipped == []

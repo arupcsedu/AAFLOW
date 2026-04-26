@@ -1,5 +1,5 @@
 baselines:
-  - ours_stateful
+  - AAFLOW+
   - dense_prefill
   - distserve_style
 workloads:

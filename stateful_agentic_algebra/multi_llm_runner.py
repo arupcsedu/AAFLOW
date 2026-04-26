@@ -9,7 +9,7 @@ The runner coordinates two measurement paths:
 
 HF measurements are converted into comparable synthetic paper rows for:
 
-* `ours_stateful`: one prefill with KV reuse plus transfer/resume estimates.
+* `AAFLOW+`: one prefill with KV reuse plus transfer/resume estimates.
 * `dense_prefill`: each branch/agent independently pays prefill.
 
 All optional backend failures are captured as skipped rows so a large sweep can
@@ -22,6 +22,7 @@ import argparse
 import csv
 import itertools
 import json
+import sys
 import time
 import uuid
 from dataclasses import asdict, dataclass
@@ -30,6 +31,7 @@ from typing import Any, Iterable, Optional
 
 from .config_utils import bool_default, config_value, csv_default, load_config_file
 from .hf_kv_backend import HFBackendConfig, HFKVBackend, HFMeasurement
+from .model_registry import get_model_spec
 from .vllm_benchmark import check_vllm_available, run_vllm_bench_serve, launch_vllm_server, wait_for_server
 
 
@@ -97,6 +99,8 @@ class MultiLLMConfig:
     dry_run: bool = False
     hf_device: str = "auto"
     hf_local_files_only: bool = False
+    skip_invalid_context: bool = True
+    progress: bool = True
 
     def to_json_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -113,15 +117,48 @@ def run_matrix(config: MultiLLMConfig) -> list[dict[str, Any]]:
     hf_cache: dict[tuple[str, int, int, int], HFMeasurement] = {}
     raw_path = output_dir / "results_raw.jsonl"
     with raw_path.open("w", encoding="utf-8") as raw_file:
-        for model_id, backend, context_tokens, output_tokens, num_agents, branch_factor, seed in itertools.product(
-            config.models,
-            config.backends,
-            config.context_grid,
-            config.output_grid,
-            config.agent_grid,
-            config.branch_grid,
-            config.seeds,
+        combos = list(
+            itertools.product(
+                config.models,
+                config.backends,
+                config.context_grid,
+                config.output_grid,
+                config.agent_grid,
+                config.branch_grid,
+                config.seeds,
+            )
+        )
+        for combo_idx, (model_id, backend, context_tokens, output_tokens, num_agents, branch_factor, seed) in enumerate(
+            combos, start=1
         ):
+            if config.progress:
+                _print_progress(
+                    f"[{combo_idx}/{len(combos)}] model={model_id} backend={backend} "
+                    f"context={context_tokens} output={output_tokens} agents={num_agents} "
+                    f"branch={branch_factor} seed={seed}"
+                )
+            invalid_reason = _invalid_context_reason(model_id, context_tokens, output_tokens)
+            if invalid_reason and config.skip_invalid_context:
+                combo_rows = _skipped_context_rows(
+                    model_id=model_id,
+                    backend=backend,
+                    context_tokens=context_tokens,
+                    output_tokens=output_tokens,
+                    num_agents=num_agents,
+                    branch_factor=branch_factor,
+                    num_prompts=config.num_prompts,
+                    seed=seed,
+                    reason=invalid_reason,
+                )
+                for row in combo_rows:
+                    normalized = _normalize_row(row)
+                    rows.append(normalized)
+                    raw_file.write(json.dumps(normalized, sort_keys=True) + "\n")
+                    raw_file.flush()
+                if config.progress:
+                    _print_progress(f"  skipped: {invalid_reason}")
+                continue
+
             if backend == "hf":
                 combo_rows = _run_hf_combo(
                     config=config,
@@ -173,6 +210,7 @@ def run_matrix(config: MultiLLMConfig) -> list[dict[str, Any]]:
 
     _write_csv(output_dir / "results.csv", rows)
     _write_summary(output_dir / "summary_by_model.csv", rows)
+    _write_benchmark_table(output_dir / "benchmark.out", rows)
     return rows
 
 
@@ -224,7 +262,7 @@ def _run_hf_combo(
                     skipped=True,
                     reason=str(exc),
                 )
-                for workload in ("ours_stateful", "dense_prefill")
+                for workload in ("AAFLOW+", "dense_prefill")
             ]
 
     measured = measurement.metrics
@@ -263,7 +301,7 @@ def _run_hf_combo(
         {
             **common,
             "run_id": _run_id(),
-            "workload_name": "ours_stateful",
+            "workload_name": "AAFLOW+",
             "ttft_sec": ttft_sec,
             "total_latency_sec": stateful_total,
             "prefill_sec": prefill_sec,
@@ -466,6 +504,84 @@ def _write_summary(path: Path, rows: list[dict[str, Any]]) -> None:
     )
 
 
+def _write_benchmark_table(path: Path, rows: list[dict[str, Any]]) -> None:
+    """Write a compact table summary similar to AAFLOW benchmark.out files."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    headers = [
+        "Model",
+        "Backend",
+        "Ctx",
+        "Out",
+        "Prompts",
+        "TTFT(s)",
+        "TPOT(s)",
+        "ITL(s)",
+        "Tok/s",
+        "Req/s",
+        "Total(s)",
+        "Status",
+    ]
+    table_rows = []
+    for row in rows:
+        status = "ok" if row.get("available") is True and row.get("skipped") is not True else _short_reason(row.get("reason", "skipped"))
+        table_rows.append(
+            [
+                _short_model(str(row.get("model_id", ""))),
+                str(row.get("backend", "")),
+                str(row.get("context_tokens", "")),
+                str(row.get("output_tokens", "")),
+                str(row.get("num_prompts", "")),
+                _fmt_float(row.get("ttft_sec")),
+                _fmt_float(row.get("tpot_sec")),
+                _fmt_float(row.get("itl_sec")),
+                _fmt_float(row.get("throughput_tokens_per_sec")),
+                _fmt_float(row.get("request_throughput_req_per_sec")),
+                _fmt_float(row.get("total_latency_sec")),
+                status,
+            ]
+        )
+
+    widths = [
+        max(len(headers[idx]), *(len(table_row[idx]) for table_row in table_rows))
+        for idx in range(len(headers))
+    ]
+    lines = [
+        " | ".join(headers[idx].ljust(widths[idx]) for idx in range(len(headers))),
+        "-+-".join("-" * width for width in widths),
+    ]
+    lines.extend(
+        " | ".join(table_row[idx].ljust(widths[idx]) for idx in range(len(headers)))
+        for table_row in table_rows
+    )
+    if not table_rows:
+        lines.append("No benchmark rows were produced.")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _short_model(model_id: str) -> str:
+    if "/" in model_id:
+        return model_id.rsplit("/", 1)[-1]
+    return model_id
+
+
+def _short_reason(reason: Any, limit: int = 42) -> str:
+    text = str(reason or "skipped")
+    return text if len(text) <= limit else text[: max(0, limit - 3)] + "..."
+
+
+def _fmt_float(value: Any) -> str:
+    try:
+        if value in {"", None}:
+            return ""
+        number = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if number != number:
+        return ""
+    return f"{number:.3f}"
+
+
 def _write_csv_with_fields(path: Path, rows: list[dict[str, Any]], fields: list[str]) -> None:
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
@@ -504,6 +620,67 @@ def _base_row(
         "reason": reason,
         "branch_instances": _branch_instances(num_agents, branch_factor),
     }
+
+
+def _skipped_context_rows(
+    *,
+    model_id: str,
+    backend: str,
+    context_tokens: int,
+    output_tokens: int,
+    num_agents: int,
+    branch_factor: int,
+    num_prompts: int,
+    seed: int,
+    reason: str,
+) -> list[dict[str, Any]]:
+    workloads = ("AAFLOW+", "dense_prefill") if backend == "hf" else ("vllm_serve",)
+    return [
+        _base_row(
+            model_id=model_id,
+            backend=backend,
+            workload_name=workload,
+            context_tokens=context_tokens,
+            output_tokens=output_tokens,
+            num_agents=num_agents,
+            branch_factor=branch_factor,
+            num_prompts=num_prompts,
+            seed=seed,
+            available=False,
+            skipped=True,
+            reason=reason,
+        )
+        for workload in workloads
+    ]
+
+
+def _invalid_context_reason(model_id: str, context_tokens: int, output_tokens: int) -> str:
+    max_context = _model_max_context(model_id)
+    if max_context <= 0:
+        return ""
+    requested_total = int(context_tokens) + int(output_tokens)
+    if requested_total > max_context:
+        return (
+            f"requested context+output tokens ({requested_total}) exceeds max context "
+            f"{max_context} for {model_id}"
+        )
+    return ""
+
+
+def _model_max_context(model_id: str) -> int:
+    spec = get_model_spec(model_id)
+    if spec is not None:
+        return int(spec.max_context)
+    lowered = model_id.lower()
+    if "gpt2" in lowered:
+        return 1024
+    if "mistral" in lowered or "qwen2.5" in lowered:
+        return 32768
+    if "llama-3" in lowered or "meta-llama-3" in lowered:
+        return 8192
+    if "llama-2" in lowered:
+        return 4096
+    return 0
 
 
 def _mock_hf_measurement(model_id: str, context_tokens: int, output_tokens: int) -> HFMeasurement:
@@ -583,6 +760,10 @@ def _parse_float(value: str) -> float:
     return float(value)
 
 
+def _print_progress(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
+
+
 def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     argv_list = list(argv) if argv is not None else None
     pre_parser = argparse.ArgumentParser(add_help=False)
@@ -612,6 +793,8 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument("--vllm-bench-timeout-sec", type=float, default=float(config_value(config, "vllm_bench_timeout_sec", "vllm-bench-timeout-sec", default=1800.0)))
     parser.add_argument("--hf-device", default=str(config_value(config, "hf_device", "hf-device", default="auto")), choices=["auto", "cpu", "cuda"])
     parser.add_argument("--hf-local-files-only", action="store_true", default=bool_default(config_value(config, "hf_local_files_only", "hf-local-files-only", default=False)))
+    parser.add_argument("--skip-invalid-context", action=argparse.BooleanOptionalAction, default=bool_default(config_value(config, "skip_invalid_context", "skip-invalid-context", default=True)))
+    parser.add_argument("--progress", action=argparse.BooleanOptionalAction, default=bool_default(config_value(config, "progress", default=True)))
     parser.add_argument("--dry-run", action="store_true", default=bool_default(config_value(config, "dry_run", "dry-run", default=False)), help="Use synthetic measurements without loading models")
     args = parser.parse_args(argv_list)
     if not args.models:
@@ -646,6 +829,8 @@ def config_from_args(args: argparse.Namespace) -> MultiLLMConfig:
         vllm_bench_timeout_sec=float(args.vllm_bench_timeout_sec),
         hf_device=args.hf_device,
         hf_local_files_only=bool(args.hf_local_files_only),
+        skip_invalid_context=bool(args.skip_invalid_context),
+        progress=bool(args.progress),
         dry_run=bool(args.dry_run),
     )
 

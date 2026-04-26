@@ -61,17 +61,18 @@ def test_baseline_metrics_use_identical_schema():
     assert results[2].metrics["reuse_ratio"] > 0.0
 
 
-def test_sglang_baseline_skips_when_unavailable():
+def test_sglang_baseline_runs_with_simulated_fallback_when_unavailable():
     baseline = SGLangPrefixBaseline()
     result = baseline.run_workload({"context_tokens": 16, "num_agents": 2})
 
+    assert result.skipped is False
+    assert EXPECTED_SCHEMA.issubset(result.metrics)
     if importlib.util.find_spec("sglang") is None:
-        assert result.skipped is True
         assert result.available is False
-        assert "SGLang is not installed" in result.reason
+        assert result.metadata["mode"] == "mock_sglang_prefix"
     else:
-        assert result.skipped is False
-        assert EXPECTED_SCHEMA.issubset(result.metrics)
+        assert result.available is True
+        assert result.metadata["mode"] == "sglang_prefix"
 
 
 def test_get_baselines_returns_adapter_instances():

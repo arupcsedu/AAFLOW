@@ -532,7 +532,7 @@ def _real_primary_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if _row_usable(row)
         and _number(row.get("ttft_sec")) is not None
         and (
-            row.get("workload_name") in {"ours_stateful", "vllm_serve"}
+            row.get("workload_name") in {"AAFLOW+", "aaflow_plus", "vllm_serve"}
             or str(row.get("backend", "")).lower() == "vllm"
             or not row.get("workload_name")
         )
@@ -561,7 +561,7 @@ def _real_speedup_points(rows: list[dict[str, Any]]) -> dict[str, list[tuple[flo
         workload = str(row.get("workload_name") or "")
         if workload == "dense_prefill":
             dense_by_key[key] = row
-        elif workload in {"ours_stateful", ""}:
+        elif workload in {"AAFLOW+", "aaflow_plus", ""}:
             stateful_rows.append(row)
 
     for row in stateful_rows:

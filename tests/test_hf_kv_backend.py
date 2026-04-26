@@ -58,7 +58,7 @@ def test_experiment_runner_accepts_hf_backend_without_crashing(tmp_path):
             "-m",
             "stateful_agentic_algebra.experiment_runner",
             "--baseline",
-            "ours_stateful",
+            "AAFLOW+",
             "--workload",
             "linear_handoff",
             "--backend",

@@ -1,5 +1,5 @@
 baselines:
-  - ours_stateful
+  - AAFLOW+
   - dense_prefill
   - aaflow_text
   - vllm_local_prefix

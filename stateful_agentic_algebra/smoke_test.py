@@ -50,7 +50,7 @@ def main() -> None:
 
     payload = json.loads(results_json.read_text(encoding="utf-8"))
     baselines = {row.get("baseline_name") for row in payload.get("results", [])}
-    missing = {"dense_prefill", "ours_stateful"} - baselines
+    missing = {"dense_prefill", "AAFLOW+"} - baselines
     if missing:
         raise RuntimeError(f"Smoke test missing required baseline rows: {sorted(missing)}")
 
