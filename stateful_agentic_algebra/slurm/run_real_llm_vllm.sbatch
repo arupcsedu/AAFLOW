@@ -1,0 +1,98 @@
+#!/bin/bash
+#SBATCH --job-name=stateful-vllm
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH -A bii_dsc_community
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
+#SBATCH --mem=128G
+#SBATCH --time=06:00:00
+#SBATCH --output=/project/bi_dsc_community/drc_rag/stateful_agentic_algebra/slurm/slurm-%x-%j.out
+#SBATCH --error=/project/bi_dsc_community/drc_rag/stateful_agentic_algebra/slurm/slurm-%x-%j.err
+
+set -euo pipefail
+export SLURM_CPU_BIND=none
+
+# Override the generic GPU request at submit time for a specific accelerator:
+#   sbatch --gres=gpu:a100:1 ...
+#   sbatch --gres=gpu:h100:1 ...
+
+PROJECT_ROOT="${PROJECT_ROOT:-/project/bi_dsc_community/drc_rag}"
+PYTHON_BIN="${PYTHON_BIN:-/scratch/djy8hg/env/saa_vllm_env/bin/python}"
+
+MODEL_ID="${MODEL_ID:-gpt2}"
+BACKEND="${BACKEND:-vllm}"
+CONTEXT_GRID="${CONTEXT_GRID:-128}"
+OUTPUT_GRID="${OUTPUT_GRID:-16}"
+AGENT_GRID="${AGENT_GRID:-2}"
+BRANCH_GRID="${BRANCH_GRID:-2}"
+NUM_PROMPTS="${NUM_PROMPTS:-4}"
+TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
+OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_ROOT/runs/stateful/real_llm_vllm/${SLURM_JOB_ID:-manual}}"
+
+export HF_HOME="${HF_HOME:-/scratch/${USER}/hf_cache}"
+export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/transformers}"
+export HUGGINGFACE_HUB_TOKEN="${HUGGINGFACE_HUB_TOKEN:-${HF_TOKEN:-}}"
+if [[ -n "$HUGGINGFACE_HUB_TOKEN" ]]; then
+  export HF_TOKEN="$HUGGINGFACE_HUB_TOKEN"
+fi
+export PYTHONNOUSERSITE="${PYTHONNOUSERSITE:-1}"
+
+mkdir -p "$OUTPUT_DIR/logs" "$HF_HOME" "$TRANSFORMERS_CACHE"
+
+cd "$PROJECT_ROOT"
+export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
+
+echo "Job: ${SLURM_JOB_ID:-manual}" | tee "$OUTPUT_DIR/logs/job_info.log"
+echo "Node list: ${SLURM_NODELIST:-unknown}" | tee -a "$OUTPUT_DIR/logs/job_info.log"
+echo "Backend: $BACKEND" | tee -a "$OUTPUT_DIR/logs/job_info.log"
+echo "Model: $MODEL_ID" | tee -a "$OUTPUT_DIR/logs/job_info.log"
+echo "TP size: $TENSOR_PARALLEL_SIZE" | tee -a "$OUTPUT_DIR/logs/job_info.log"
+echo "Output: $OUTPUT_DIR" | tee -a "$OUTPUT_DIR/logs/job_info.log"
+
+if command -v nvidia-smi >/dev/null 2>&1; then
+  nvidia-smi | tee "$OUTPUT_DIR/logs/nvidia_smi_start.log"
+  nvidia-smi -L | tee "$OUTPUT_DIR/logs/nvidia_smi_devices.log"
+else
+  echo "nvidia-smi not found" | tee "$OUTPUT_DIR/logs/nvidia_smi_start.log"
+fi
+
+echo "Running tiny vLLM smoke test..."
+/usr/bin/time -v \
+  srun --cpu-bind=none --nodes=1 --ntasks=1 --cpus-per-task="${SLURM_CPUS_PER_TASK:-8}" \
+  "$PYTHON_BIN" -m stateful_agentic_algebra.vllm_benchmark \
+    --model-id gpt2 \
+    --input-len 16 \
+    --output-len 4 \
+    --num-prompts 1 \
+    --request-rate 1 \
+    --tensor-parallel-size 1 \
+    --server-timeout-sec 300 \
+    --output-dir "$OUTPUT_DIR/smoke_vllm" \
+    --require-vllm \
+  >"$OUTPUT_DIR/logs/smoke_vllm.out" 2>"$OUTPUT_DIR/logs/smoke_vllm.err"
+
+echo "Running vLLM real LLM sweep..."
+/usr/bin/time -v \
+  srun --cpu-bind=none --nodes=1 --ntasks=1 --cpus-per-task="${SLURM_CPUS_PER_TASK:-8}" \
+  "$PYTHON_BIN" -m stateful_agentic_algebra.multi_llm_runner \
+    --models "$MODEL_ID" \
+    --backend "$BACKEND" \
+    --context-grid "$CONTEXT_GRID" \
+    --output-grid "$OUTPUT_GRID" \
+    --agent-grid "$AGENT_GRID" \
+    --branch-grid "$BRANCH_GRID" \
+    --num-prompts "$NUM_PROMPTS" \
+    --tensor-parallel-size "$TENSOR_PARALLEL_SIZE" \
+    --output-dir "$OUTPUT_DIR" \
+  >"$OUTPUT_DIR/logs/sweep.out" 2>"$OUTPUT_DIR/logs/sweep.err"
+
+if command -v nvidia-smi >/dev/null 2>&1; then
+  nvidia-smi | tee "$OUTPUT_DIR/logs/nvidia_smi_end.log"
+fi
+
+echo "Done. Results:"
+echo "  $OUTPUT_DIR/results_raw.jsonl"
+echo "  $OUTPUT_DIR/results.csv"
+echo "  $OUTPUT_DIR/summary_by_model.csv"

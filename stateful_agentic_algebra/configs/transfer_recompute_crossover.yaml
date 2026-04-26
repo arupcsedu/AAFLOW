@@ -1,0 +1,27 @@
+baselines:
+  - ours_stateful
+  - dense_prefill
+  - distserve_style
+workloads:
+  - transfer_recompute_crossover
+context_grid:
+  - 512
+  - 1024
+  - 2048
+  - 4096
+  - 8192
+  - 16384
+  - 32768
+output_grid:
+  - 64
+agent_grid:
+  - 4
+branch_grid:
+  - 2
+  - 4
+num_requests: 3
+backend_type: mock
+model_id: mock-model
+tokenizer_id: mock-tokenizer
+seed: 0
+output_dir: runs/stateful/transfer_recompute_crossover

@@ -34,6 +34,37 @@ These stages are benchmarked independently and in aggregate.
   - Framework-level benchmark for `AAFLOW`, `LangChain`, `LangGraph`, `CrewAI`, and `AutoGen`.
 - `drc_rag/higress_agentic_benchmark/`
   - HigressRAG vs AgenticRAG comparison benchmark.
+- `drc_rag/stateful_agentic_algebra/`
+  - Standalone Stateful Agentic Algebra layer for KV-state lifecycle
+    experiments, transfer-vs-recompute scheduling, mock-safe baselines,
+    real-model HF/vLLM measurements, and publication plots.
+
+### Stateful Agentic Algebra
+
+The `stateful_agentic_algebra/` module extends AAFLOW experiments without
+changing the existing AAFLOW pipeline. It models agentic workflows with explicit
+KV state objects and operators for materialize, transfer, fork, restricted
+merge, and evict. It runs in CPU/mock mode by default and skips optional GPU
+dependencies cleanly.
+
+Quick smoke test:
+
+```bash
+python -m stateful_agentic_algebra.smoke_test
+```
+
+Full mock paper sweep:
+
+```bash
+python -m stateful_agentic_algebra.experiment_runner \
+  --config stateful_agentic_algebra/configs/full_paper_sweep.yaml
+```
+
+Documentation:
+
+- `stateful_agentic_algebra/README.md`
+- `stateful_agentic_algebra/ARTIFACT_EVALUATION.md`
+- `docs/stateful_agentic_algebra.md`
 
 ### Important Benchmark Semantics
 

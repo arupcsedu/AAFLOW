@@ -1,0 +1,37 @@
+baselines:
+  - ours_stateful
+  - dense_prefill
+  - aaflow_text
+  - vllm_local_prefix
+  - sglang_prefix
+  - distserve_style
+workloads:
+  - linear_handoff
+  - multi_agent_debate
+  - tree_of_thought
+  - rag_shared_context
+  - transfer_recompute_crossover
+context_grid:
+  - 1024
+  - 4096
+  - 8192
+  - 16384
+  - 32768
+output_grid:
+  - 64
+  - 128
+agent_grid:
+  - 2
+  - 4
+  - 8
+  - 16
+branch_grid:
+  - 2
+  - 4
+  - 8
+num_requests: 5
+backend_type: mock
+model_id: mock-model
+tokenizer_id: mock-tokenizer
+seed: 0
+output_dir: runs/stateful/full_paper_sweep

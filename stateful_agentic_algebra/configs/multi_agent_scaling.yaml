@@ -1,0 +1,25 @@
+baselines:
+  - ours_stateful
+  - dense_prefill
+  - distserve_style
+workloads:
+  - multi_agent_debate
+  - rag_shared_context
+context_grid:
+  - 4096
+  - 8192
+output_grid:
+  - 64
+agent_grid:
+  - 2
+  - 4
+  - 8
+  - 16
+branch_grid:
+  - 2
+num_requests: 3
+backend_type: mock
+model_id: mock-model
+tokenizer_id: mock-tokenizer
+seed: 0
+output_dir: runs/stateful/multi_agent_scaling

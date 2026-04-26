@@ -1,0 +1,23 @@
+models:
+  - gpt2
+  - mistralai/Mistral-7B-Instruct-v0.3
+  - meta-llama/Meta-Llama-3-8B-Instruct
+backends:
+  - hf
+  - vllm
+context_grid:
+  - 4096
+  - 8192
+output_grid:
+  - 128
+agent_grid:
+  - 2
+  - 4
+  - 8
+  - 16
+branch_grid:
+  - 2
+num_prompts: 16
+num_requests: 1
+tensor_parallel_size: 1
+output_dir: runs/stateful/real_llm_multi_agent_scaling

@@ -74,6 +74,48 @@ def test_single_ours_stateful_run_writes_required_outputs(tmp_path):
     assert rows[0]["baseline_name"] == "ours_stateful"
 
 
+def test_experiment_runner_accepts_yaml_config(tmp_path):
+    output_dir = tmp_path / "configured"
+    config_path = tmp_path / "experiment.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "baselines:",
+                "  - ours_stateful",
+                "  - dense_prefill",
+                "workloads:",
+                "  - linear_handoff",
+                "context_grid:",
+                "  - 16",
+                "output_grid:",
+                "  - 4",
+                "agent_grid:",
+                "  - 2",
+                "branch_grid:",
+                "  - 1",
+                "num_requests: 1",
+                "backend_type: mock",
+                f"output_dir: {output_dir}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    proc = run_cli("--config", str(config_path))
+
+    payload = json.loads(proc.stdout)
+    assert payload["num_runs"] == 2
+    assert (output_dir / "results.csv").exists()
+    config = json.loads((output_dir / "config.json").read_text(encoding="utf-8"))
+    assert config["source_config"]["baselines"] == ["ours_stateful", "dense_prefill"]
+    assert config["resolved"]["baselines"] == ["ours_stateful", "dense_prefill"]
+    with (output_dir / "results.csv").open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert {row["baseline_name"] for row in rows} == {"ours_stateful", "dense_prefill"}
+    assert all(row["backend_type"] == "mock" for row in rows)
+    assert all(row["configured_baselines"] == "ours_stateful,dense_prefill" for row in rows)
+
+
 def test_all_baselines_all_workloads_small_sweep_skips_missing_optional(tmp_path):
     output_dir = tmp_path / "sweep"
 

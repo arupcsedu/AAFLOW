@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from .baselines import BaselineResult, get_baselines, list_baselines as list_adapter_baselines
+from .config_utils import bool_default, config_value, csv_default, load_config_file
 from .hf_kv_backend import HFBackendConfig, HFKVBackend
 from .metrics_stateful import METRIC_FIELDS
 from .runtime import RuntimeConfig, StatefulRuntime
@@ -66,34 +67,81 @@ WORKLOAD_GENERATORS = {
 }
 
 
+def _first_model(config: dict[str, Any], fallback: str) -> str:
+    models = config_value(config, "models")
+    if isinstance(models, list) and models:
+        return str(models[0])
+    if isinstance(models, str) and models:
+        return models.split(",", 1)[0].strip() or fallback
+    return fallback
+
+
+def _first_config_item(config: dict[str, Any], key: str, fallback: str) -> str:
+    value = config_value(config, key)
+    if isinstance(value, list) and value:
+        return str(value[0])
+    if isinstance(value, str) and value:
+        return value.split(",", 1)[0].strip() or fallback
+    return fallback
+
+
+def _config_list(config: dict[str, Any], *keys: str) -> list[str]:
+    value = config_value(config, *keys)
+    if value is None or value == "":
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
+def _experiment_backend_default(config: dict[str, Any]) -> str:
+    backend = config_value(config, "backend", "backend_type")
+    if isinstance(backend, str) and backend in {"mock", "hf"}:
+        return backend
+    backends = config_value(config, "backends")
+    if isinstance(backends, list) and "hf" in backends:
+        return "hf"
+    if isinstance(backends, str) and "hf" in [item.strip() for item in backends.split(",")]:
+        return "hf"
+    return "mock"
+
+
 def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
+    argv_list = list(argv) if argv is not None else None
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config", default="")
+    pre_args, _ = pre_parser.parse_known_args(argv_list)
+    config = load_config_file(pre_args.config)
+
     parser = argparse.ArgumentParser(description="Run Stateful Agentic Algebra experiments")
+    parser.add_argument("--config", default="", help="YAML/JSON config file")
     parser.add_argument("--list-baselines", action="store_true", help="List baseline adapters and availability")
-    parser.add_argument("--baseline", choices=BASELINE_NAMES, default="ours_stateful")
-    parser.add_argument("--all-baselines", action="store_true", help="Run every registered baseline")
-    parser.add_argument("--workload", choices=sorted(WORKLOAD_GENERATORS), default="linear_handoff")
-    parser.add_argument("--all-workloads", action="store_true", help="Run every workload generator")
-    parser.add_argument("--context-tokens", type=int, default=128)
-    parser.add_argument("--output-tokens", type=int, default=32)
-    parser.add_argument("--num-agents", type=int, default=4)
-    parser.add_argument("--branch-factor", type=int, default=4)
-    parser.add_argument("--depth", type=int, default=2)
-    parser.add_argument("--num-requests", type=int, default=1)
-    parser.add_argument("--model-id", type=str, default="mock-model")
-    parser.add_argument("--tokenizer-id", type=str, default="mock-tokenizer")
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--context-grid", type=str, default="")
-    parser.add_argument("--agent-grid", type=str, default="")
-    parser.add_argument("--branch-grid", type=str, default="")
-    parser.add_argument("--output-dir", type=str, default="runs/stateful/latest")
-    parser.add_argument("--backend", choices=["mock", "hf"], default="mock", help="Execution backend for ours_stateful")
+    parser.add_argument("--baseline", choices=BASELINE_NAMES, default=str(config_value(config, "baseline", default=_first_config_item(config, "baselines", "ours_stateful"))))
+    parser.add_argument("--all-baselines", action="store_true", default=bool_default(config_value(config, "all_baselines", "all-baselines", default=False)), help="Run every registered baseline")
+    parser.add_argument("--workload", choices=sorted(WORKLOAD_GENERATORS), default=str(config_value(config, "workload", "workload_name", default=_first_config_item(config, "workloads", "linear_handoff"))))
+    parser.add_argument("--all-workloads", action="store_true", default=bool_default(config_value(config, "all_workloads", "all-workloads", default=False)), help="Run every workload generator")
+    parser.add_argument("--context-tokens", type=int, default=int(config_value(config, "context_tokens", "context-tokens", default=128)))
+    parser.add_argument("--output-tokens", type=int, default=int(config_value(config, "output_tokens", "output-tokens", default=32)))
+    parser.add_argument("--num-agents", type=int, default=int(config_value(config, "num_agents", "num-agents", default=4)))
+    parser.add_argument("--branch-factor", type=int, default=int(config_value(config, "branch_factor", "branch-factor", default=4)))
+    parser.add_argument("--depth", type=int, default=int(config_value(config, "depth", default=2)))
+    parser.add_argument("--num-requests", type=int, default=int(config_value(config, "num_requests", "num-requests", "num_prompts", default=1)))
+    parser.add_argument("--model-id", type=str, default=str(config_value(config, "model_id", "model-id", default=_first_model(config, "mock-model"))))
+    parser.add_argument("--tokenizer-id", type=str, default=str(config_value(config, "tokenizer_id", "tokenizer-id", default=_first_model(config, "mock-tokenizer"))))
+    parser.add_argument("--seed", type=int, default=int(config_value(config, "seed", default=0)))
+    parser.add_argument("--context-grid", type=str, default=csv_default(config_value(config, "context_grid", "context-grid", default="")))
+    parser.add_argument("--output-grid", type=str, default=csv_default(config_value(config, "output_grid", "output-grid", default="")))
+    parser.add_argument("--agent-grid", type=str, default=csv_default(config_value(config, "agent_grid", "agent-grid", default="")))
+    parser.add_argument("--branch-grid", type=str, default=csv_default(config_value(config, "branch_grid", "branch-grid", default="")))
+    parser.add_argument("--output-dir", type=str, default=str(config_value(config, "output_dir", "output-dir", default="runs/stateful/latest")))
+    parser.add_argument("--backend", choices=["mock", "hf"], default=_experiment_backend_default(config), help="Execution backend for ours_stateful")
 
     # Backwards-compatible aliases from the earlier runner.
     parser.add_argument("--branches", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--shared-prefix-tokens", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--output-json", type=str, default="", help=argparse.SUPPRESS)
     parser.add_argument("--generation-backend", choices=["mock", "aaflow", "vllm", "sglang", "hf"], default="mock", help=argparse.SUPPRESS)
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    args = parser.parse_args(argv_list)
 
     if args.branches is not None:
         args.num_agents = args.branches
@@ -104,6 +152,15 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
         args.output_dir = str(Path(args.output_json).parent or Path("."))
     if args.generation_backend == "hf":
         args.backend = "hf"
+    args.config_values = config
+    args.config_baselines = _config_list(config, "baselines")
+    args.config_workloads = _config_list(config, "workloads")
+    invalid_baselines = sorted(set(args.config_baselines) - set(BASELINE_NAMES))
+    invalid_workloads = sorted(set(args.config_workloads) - set(WORKLOAD_GENERATORS))
+    if invalid_baselines:
+        parser.error(f"Unknown baselines in config: {', '.join(invalid_baselines)}")
+    if invalid_workloads:
+        parser.error(f"Unknown workloads in config: {', '.join(invalid_workloads)}")
     return args
 
 
@@ -122,9 +179,10 @@ def run_experiment(args: argparse.Namespace) -> dict[str, Any]:
         print(json.dumps(payload, indent=2))
         return {"results": [], "skipped_baselines": [], **payload}
 
-    baselines = BASELINE_NAMES if args.all_baselines else [args.baseline]
-    workloads = sorted(WORKLOAD_GENERATORS) if args.all_workloads else [args.workload]
+    baselines = args.config_baselines or (BASELINE_NAMES if args.all_baselines else [args.baseline])
+    workloads = args.config_workloads or (sorted(WORKLOAD_GENERATORS) if args.all_workloads else [args.workload])
     context_grid = _parse_grid(args.context_grid, args.context_tokens)
+    output_grid = _parse_grid(args.output_grid, args.output_tokens)
     agent_grid = _parse_grid(args.agent_grid, args.num_agents)
     branch_grid = _parse_grid(args.branch_grid, args.branch_factor)
 
@@ -134,36 +192,47 @@ def run_experiment(args: argparse.Namespace) -> dict[str, Any]:
 
     for workload_name in workloads:
         for context_tokens in context_grid:
-            for num_agents in agent_grid:
-                for branch_factor in branch_grid:
-                    cfg = WorkloadConfig(
-                        workload_name=workload_name,
-                        context_tokens=context_tokens,
-                        output_tokens=args.output_tokens,
-                        num_agents=num_agents,
-                        branch_factor=branch_factor,
-                        depth=args.depth,
-                        num_requests=args.num_requests,
-                        model_id=args.model_id,
-                        tokenizer_id=args.tokenizer_id,
-                        seed=args.seed,
-                    ).normalized()
-                    generated = WORKLOAD_GENERATORS[workload_name](cfg)
-                    for baseline_name in baselines:
-                        run_index += 1
-                        run_id = _run_id(baseline_name, workload_name, context_tokens, num_agents, branch_factor, run_index)
-                        row_or_skip = _run_one(
-                            baseline_name=baseline_name,
-                            workload=generated,
-                            requested_config=cfg,
-                            run_id=run_id,
-                            generation_backend=args.generation_backend,
-                            backend=args.backend,
-                        )
-                        if row_or_skip.get("skipped"):
-                            skipped.append(row_or_skip)
-                        else:
-                            results.append(row_or_skip)
+            for output_tokens in output_grid:
+                for num_agents in agent_grid:
+                    for branch_factor in branch_grid:
+                        cfg = WorkloadConfig(
+                            workload_name=workload_name,
+                            context_tokens=context_tokens,
+                            output_tokens=output_tokens,
+                            num_agents=num_agents,
+                            branch_factor=branch_factor,
+                            depth=args.depth,
+                            num_requests=args.num_requests,
+                            model_id=args.model_id,
+                            tokenizer_id=args.tokenizer_id,
+                            seed=args.seed,
+                        ).normalized()
+                        generated = WORKLOAD_GENERATORS[workload_name](cfg)
+                        for baseline_name in baselines:
+                            run_index += 1
+                            run_id = _run_id(baseline_name, workload_name, context_tokens, num_agents, branch_factor, run_index)
+                            row_or_skip = _run_one(
+                                baseline_name=baseline_name,
+                                workload=generated,
+                                requested_config=cfg,
+                                run_id=run_id,
+                                generation_backend=args.generation_backend,
+                                backend=args.backend,
+                            )
+                            _attach_config_values(
+                                row_or_skip,
+                                args=args,
+                                baselines=baselines,
+                                workloads=workloads,
+                                context_grid=context_grid,
+                                output_grid=output_grid,
+                                agent_grid=agent_grid,
+                                branch_grid=branch_grid,
+                            )
+                            if row_or_skip.get("skipped"):
+                                skipped.append(row_or_skip)
+                            else:
+                                results.append(row_or_skip)
 
     payload = {"results": results}
     config = _config_payload(args)
@@ -171,6 +240,7 @@ def run_experiment(args: argparse.Namespace) -> dict[str, Any]:
         "baselines": baselines,
         "workloads": workloads,
         "context_grid": context_grid,
+        "output_grid": output_grid,
         "agent_grid": agent_grid,
         "branch_grid": branch_grid,
         "num_runs": len(results),
@@ -510,7 +580,25 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = [*METRIC_FIELDS, "baseline_label", "available", "reason", "model_id", "tokenizer_id", "num_requests", "depth"]
+    base_fields = [
+        *METRIC_FIELDS,
+        "baseline_label",
+        "available",
+        "reason",
+        "model_id",
+        "tokenizer_id",
+        "num_requests",
+        "depth",
+        "backend_type",
+        "config_path",
+        "configured_baselines",
+        "configured_workloads",
+        "context_grid",
+        "output_grid",
+        "agent_grid",
+        "branch_grid",
+    ]
+    fieldnames = [*base_fields, *sorted({key for row in rows for key in row} - set(base_fields))]
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
@@ -521,9 +609,35 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 def _config_payload(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "args": {key: _jsonable(value) for key, value in vars(args).items()},
+        "source_config": _jsonable(getattr(args, "config_values", {})),
         "baselines": list_baselines(),
         "workloads": sorted(WORKLOAD_GENERATORS),
     }
+
+
+def _attach_config_values(
+    row: dict[str, Any],
+    *,
+    args: argparse.Namespace,
+    baselines: list[str],
+    workloads: list[str],
+    context_grid: list[int],
+    output_grid: list[int],
+    agent_grid: list[int],
+    branch_grid: list[int],
+) -> None:
+    row.update(
+        {
+            "backend_type": args.backend,
+            "config_path": args.config,
+            "configured_baselines": ",".join(baselines),
+            "configured_workloads": ",".join(workloads),
+            "context_grid": ",".join(str(item) for item in context_grid),
+            "output_grid": ",".join(str(item) for item in output_grid),
+            "agent_grid": ",".join(str(item) for item in agent_grid),
+            "branch_grid": ",".join(str(item) for item in branch_grid),
+        }
+    )
 
 
 def _jsonable(value: Any) -> Any:

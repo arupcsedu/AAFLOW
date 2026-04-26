@@ -1,0 +1,25 @@
+baselines:
+  - ours_stateful
+  - dense_prefill
+workloads:
+  - tree_of_thought
+  - rag_shared_context
+context_grid:
+  - 4096
+  - 8192
+  - 16384
+output_grid:
+  - 64
+agent_grid:
+  - 4
+branch_grid:
+  - 1
+  - 2
+  - 4
+  - 8
+num_requests: 3
+backend_type: mock
+model_id: mock-model
+tokenizer_id: mock-tokenizer
+seed: 0
+output_dir: runs/stateful/memory_efficiency

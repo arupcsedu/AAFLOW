@@ -84,6 +84,22 @@ _VLLM_BENCHMARK_EXPORTS = {
     "wait_for_server",
 }
 _MODEL_REGISTRY_EXPORTS = {"ModelSpec", "default_model_registry", "get_model_spec", "list_models", "model_availability"}
+_MULTI_LLM_EXPORTS = {"MultiLLMConfig", "run_matrix"}
+_TRANSFER_CROSSOVER_EXPORTS = {
+    "Measurement",
+    "ModelKVMetadata",
+    "analyze_crossover",
+    "estimate_measurement",
+    "model_metadata",
+}
+_CONSISTENCY_EXPORTS = {
+    "ConsistencyResult",
+    "compare_outputs",
+    "first_divergence_position",
+    "levenshtein_distance",
+    "run_consistency_benchmark",
+    "summarize_rows",
+}
 
 
 def __getattr__(name: str):
@@ -131,6 +147,24 @@ def __getattr__(name: str):
         value = getattr(model_registry, name)
         globals()[name] = value
         return value
+    if name in _MULTI_LLM_EXPORTS:
+        from . import multi_llm_runner
+
+        value = getattr(multi_llm_runner, name)
+        globals()[name] = value
+        return value
+    if name in _TRANSFER_CROSSOVER_EXPORTS:
+        from . import transfer_crossover_real
+
+        value = getattr(transfer_crossover_real, name)
+        globals()[name] = value
+        return value
+    if name in _CONSISTENCY_EXPORTS:
+        from . import consistency_benchmark
+
+        value = getattr(consistency_benchmark, name)
+        globals()[name] = value
+        return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -141,6 +175,7 @@ __all__ = [
     "BaselineAdapter",
     "BaselineResult",
     "CostModel",
+    "ConsistencyResult",
     "DensePrefillBaseline",
     "DistServeStyleBaseline",
     "EdgeSpec",
@@ -166,9 +201,12 @@ __all__ = [
     "METRIC_FIELDS",
     "MaterializeOperator",
     "MergeSummary",
+    "Measurement",
     "ModelSpec",
+    "ModelKVMetadata",
     "MetricEvent",
     "MockTransport",
+    "MultiLLMConfig",
     "NodeSpec",
     "OperatorSpec",
     "OperatorType",
@@ -199,18 +237,27 @@ __all__ = [
     "WorkloadConfig",
     "WorkflowState",
     "aggregate_runs",
+    "analyze_crossover",
     "check_vllm_available",
+    "compare_outputs",
     "default_model_registry",
+    "estimate_measurement",
     "export_in_aaflow_style",
+    "first_divergence_position",
     "get_model_spec",
     "get_baselines",
     "list_baselines",
     "list_models",
     "load_existing_metrics",
+    "levenshtein_distance",
     "model_availability",
+    "model_metadata",
     "launch_vllm_server",
     "parse_vllm_results",
     "run_existing_rag_agent_if_available",
+    "run_consistency_benchmark",
+    "run_matrix",
     "run_vllm_bench_serve",
+    "summarize_rows",
     "wait_for_server",
 ]

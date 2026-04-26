@@ -1,0 +1,24 @@
+baselines:
+  - ours_stateful
+  - dense_prefill
+workloads:
+  - linear_handoff
+  - rag_shared_context
+context_grid:
+  - 1024
+  - 4096
+  - 8192
+  - 16384
+  - 32768
+output_grid:
+  - 64
+agent_grid:
+  - 2
+branch_grid:
+  - 2
+num_requests: 3
+backend_type: mock
+model_id: mock-model
+tokenizer_id: mock-tokenizer
+seed: 0
+output_dir: runs/stateful/ttft_context_sweep

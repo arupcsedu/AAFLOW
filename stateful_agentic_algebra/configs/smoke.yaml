@@ -1,0 +1,20 @@
+baselines:
+  - ours_stateful
+  - dense_prefill
+workloads:
+  - linear_handoff
+  - tree_of_thought
+context_grid:
+  - 128
+output_grid:
+  - 16
+agent_grid:
+  - 2
+branch_grid:
+  - 2
+num_requests: 1
+backend_type: mock
+model_id: mock-model
+tokenizer_id: mock-tokenizer
+seed: 0
+output_dir: runs/stateful/config_smoke

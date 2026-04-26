@@ -1,0 +1,16 @@
+models:
+  - gpt2
+backends:
+  - hf
+context_grid:
+  - 128
+output_grid:
+  - 16
+agent_grid:
+  - 2
+branch_grid:
+  - 2
+num_prompts: 2
+num_requests: 1
+tensor_parallel_size: 1
+output_dir: runs/stateful/real_llm_smoke
