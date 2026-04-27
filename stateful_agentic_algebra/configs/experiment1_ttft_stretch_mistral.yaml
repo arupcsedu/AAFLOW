@@ -1,33 +1,29 @@
 models:
-  - gpt2
   - mistralai/Mistral-7B-Instruct-v0.3
-  - meta-llama/Meta-Llama-3-8B-Instruct
 backends:
   - hf
-  - vllm
-  - sglang
 context_grid:
   - 1024
+  - 2048
   - 4096
   - 8192
+  - 12288
   - 16384
-  - 32768
 output_grid:
-  - 64
-  - 128
+  - 16
 agent_grid:
-  - 2
-  - 4
   - 8
 branch_grid:
-  - 2
   - 4
-num_prompts: 16
+num_prompts: 8
 num_requests: 1
+seeds:
+  - 0
 tensor_parallel_size: 1
 bandwidth_bytes_per_sec: 25000000000
 network_latency_sec: 0.00005
 resume_overhead_sec: 0.0001
 omega_state_sec: 0.00005
 omega_text_sec: 0.00005
-output_dir: runs/stateful/real_llm_full
+hf_device: auto
+output_dir: runs/stateful/experiment1_ttft_stretch_mistral

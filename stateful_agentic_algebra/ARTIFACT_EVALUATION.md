@@ -15,29 +15,66 @@ cd AAFLOW
 ```
 
 Use any Python 3.10+ environment with `matplotlib` and `pytest` for the mock
-artifact path. The existing benchmark environment can also be used:
-
-```bash
-module load miniforge/24.3.0-py3.11
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate /scratch/djy8hg/env/drc_rag_bench_env
-cd /project/bi_dsc_community/drc_rag
-```
-
-Minimal packages for mock mode:
+artifact path. Mock experiments do not require CUDA, vLLM, SGLang, or
+Hugging Face model downloads.
 
 ```bash
 python -m pip install matplotlib pytest
 ```
 
-Optional packages for real-model runs:
+For the validated UVA cluster setup, use the checked-out repo and the split
+Python environments below. The split is intentional: the vLLM stack and the
+SGLang stack have conflicting CUDA/PyTorch dependency constraints.
 
 ```bash
-python -m pip install torch transformers huggingface_hub
+export PROJECT_ROOT=/project/bi_dsc_community/drc_rag
+cd "$PROJECT_ROOT"
+
+# Main runner, HF backend, and vLLM backend.
+export PYTHON_BIN=/scratch/djy8hg/env/saa_vllm_env/bin/python
+
+# SGLang serving backend.
+export SGLANG_PYTHON_BIN=/scratch/djy8hg/env/drc_rag_bench_env/bin/python
+
+export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
 ```
 
-Optional vLLM serving benchmarks require a compatible CUDA/PyTorch/vLLM stack.
-Install and validate vLLM in a separate GPU environment when needed.
+Validate the environments before launching a long Slurm job:
+
+```bash
+$PYTHON_BIN -c "import torch, transformers; print('main ok', torch.__version__)"
+$PYTHON_BIN -c "import vllm; print('vllm ok')"
+$SGLANG_PYTHON_BIN -c "import torch, sglang; print('sglang ok', torch.__version__)"
+```
+
+Set Hugging Face cache directories to scratch before downloading large models.
+If these variables are not set, model weights usually download under
+`~/.cache/huggingface/hub/`, which may fill home storage.
+
+```bash
+export HF_HOME=/scratch/$USER/hf_cache
+export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
+export TRANSFORMERS_CACHE=$HF_HOME/transformers
+mkdir -p "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE"
+```
+
+Gated Hugging Face models require access approval and a token:
+
+```bash
+export HUGGINGFACE_HUB_TOKEN=<your_token>
+export HF_TOKEN="$HUGGINGFACE_HUB_TOKEN"
+```
+
+For SGLang on this cluster, load a modern compiler and CUDA module before
+starting the server. Without GCC 12, SGLang JIT compilation can fail with
+`fatal error: version: No such file or directory`.
+
+```bash
+module load gcc/12.4.0 cuda/12.8.0
+export CC=$(command -v gcc)
+export CXX=$(command -v g++)
+export SGLANG_SERVER_EXTRA_ARGS='--disable-overlap-schedule --disable-cuda-graph'
+```
 
 ## Smoke Test
 
@@ -168,8 +205,36 @@ Expected real-LLM figure files:
 - Small smoke: CPU or GPU with `gpt2` or `distilgpt2`.
 - 7B models: at least one A100 80GB or H100 is recommended.
 - Larger models: tensor parallelism across multiple GPUs is recommended.
+- On this cluster, request A100 through the `gpu` partition, for example:
+  `sbatch -p gpu --gres=gpu:a100:1 --export=ALL stateful_agentic_algebra/slurm/run_real_llm_sweep.sbatch`.
+  SGLang serving does not run on V100 here because current SGLang requires
+  compute capability sm75 or newer.
 
-### Authentication
+For a small real-framework validation with non-skipped rows, use a small model
+and short context first:
+
+```bash
+export PROJECT_ROOT=/project/bi_dsc_community/drc_rag
+export PYTHON_BIN=/scratch/djy8hg/env/saa_vllm_env/bin/python
+export SGLANG_PYTHON_BIN=/scratch/djy8hg/env/drc_rag_bench_env/bin/python
+export MODEL_ID='gpt2,distilgpt2'
+export BACKEND='hf,vllm,sglang'
+export CONTEXT_GRID='16'
+export OUTPUT_GRID='4'
+export AGENT_GRID='2'
+export BRANCH_GRID='2'
+export NUM_PROMPTS='2'
+export TENSOR_PARALLEL_SIZE='1'
+export OUTPUT_DIR="$PROJECT_ROOT/runs/stateful/real_llm_multibackend_test"
+
+sbatch -p gpu --gres=gpu:a100:1 --export=ALL \
+  stateful_agentic_algebra/slurm/run_real_llm_sweep.sbatch
+```
+
+This writes `benchmark.out` in the output directory with a compact table of
+TTFT, total latency, throughput, and status for each backend/model row.
+
+### Authentication And Cache Location
 
 Gated Hugging Face models require access approval and:
 
@@ -184,9 +249,9 @@ If these variables are not set, model weights usually download under
 `~/.cache/huggingface/hub/`, which may fill home storage.
 
 ```bash
-export HF_HOME=/scratch/$USER/huggingface
-export HUGGINGFACE_HUB_CACHE=/scratch/$USER/huggingface/hub
-export TRANSFORMERS_CACHE=/scratch/$USER/huggingface/transformers
+export HF_HOME=/scratch/$USER/hf_cache
+export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
+export TRANSFORMERS_CACHE=$HF_HOME/transformers
 mkdir -p "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE"
 ```
 
@@ -229,6 +294,21 @@ python -m stateful_agentic_algebra.vllm_benchmark \
 
 If vLLM is missing, the command exits cleanly unless `--require-vllm` is used.
 
+### SGLang Serving Benchmark
+
+The multi-model runner launches SGLang through `SGLANG_PYTHON_BIN`. On this
+cluster, use the SGLang env and server flags from the installation section:
+
+```bash
+export SGLANG_PYTHON_BIN=/scratch/djy8hg/env/drc_rag_bench_env/bin/python
+export SGLANG_SERVER_EXTRA_ARGS='--disable-overlap-schedule --disable-cuda-graph'
+```
+
+If SGLang's packaged `bench_serving` command fails because optional benchmark
+dependencies such as `datasets` are not installed, the wrapper falls back to
+the OpenAI-compatible HTTP endpoint exposed by the live SGLang server and still
+records real serving latency.
+
 ### Multi-Model Sweep
 
 ```bash
@@ -241,7 +321,12 @@ Expected outputs:
 - `results_raw.jsonl`
 - `results.csv`
 - `summary_by_model.csv`
-- per-model HF/vLLM artifacts when available
+- `benchmark.out`
+- `logs/`
+- `hf_measurements/`
+- `vllm_runs/`
+- `sglang_runs/`
+- per-model HF/vLLM/SGLang artifacts when available
 
 ### Transfer/Recompute Crossover
 
@@ -323,6 +408,13 @@ The primary output metrics are:
 - CUDA OOM: reduce context length, output length, request count, or use a
   smaller model/tensor parallelism.
 - Missing vLLM: install vLLM in a GPU-compatible environment or skip vLLM rows.
+- vLLM/SGLang dependency conflicts: keep the main/vLLM environment and SGLang
+  environment separate, then pass `PYTHON_BIN` and `SGLANG_PYTHON_BIN` to the
+  Slurm script.
+- SGLang on V100: current SGLang requires compute capability sm75 or newer on
+  this setup. Request A100 with `-p gpu --gres=gpu:a100:1`.
+- SGLang JIT compile error mentioning `<version>`: load `gcc/12.4.0` and
+  `cuda/12.8.0`, then set `CC` and `CXX` before launching SGLang.
 - Gated model access: request access on Hugging Face and set
   `HUGGINGFACE_HUB_TOKEN`.
 - Hugging Face cache fills home storage: set `HF_HOME`,

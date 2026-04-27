@@ -5,6 +5,7 @@ models:
 backends:
   - hf
   - vllm
+  - sglang
 context_grid:
   - 4096
   - 8192

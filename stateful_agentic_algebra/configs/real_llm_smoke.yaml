@@ -2,6 +2,8 @@ models:
   - gpt2
 backends:
   - hf
+  - vllm
+  - sglang
 context_grid:
   - 128
 output_grid:

@@ -17,7 +17,7 @@ def test_multi_llm_runner_dry_run_outputs_matrix_files(tmp_path):
             "--models",
             "gpt2",
             "--backend",
-            "hf,vllm",
+            "hf,vllm,sglang",
             "--context-grid",
             "16,32",
             "--output-grid",
@@ -39,21 +39,30 @@ def test_multi_llm_runner_dry_run_outputs_matrix_files(tmp_path):
     )
 
     payload = json.loads(proc.stdout)
-    assert payload["rows"] == 6
+    assert payload["rows"] == 16
     assert (output_dir / "results_raw.jsonl").exists()
     assert (output_dir / "results.csv").exists()
     assert (output_dir / "summary_by_model.csv").exists()
     assert (output_dir / "config.json").exists()
 
     raw_rows = [json.loads(line) for line in (output_dir / "results_raw.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert len(raw_rows) == 6
+    assert len(raw_rows) == 16
     workloads = {row["workload_name"] for row in raw_rows}
-    assert {"AAFLOW+", "dense_prefill", "vllm_serve"} <= workloads
+    assert {
+        "AAFLOW+",
+        "dense_prefill",
+        "aaflow_text",
+        "vllm_local_prefix",
+        "sglang_prefix",
+        "distserve_style",
+        "vllm_serve",
+        "sglang_serve",
+    } <= workloads
     assert all(row["model_id"] == "gpt2" for row in raw_rows)
 
     with (output_dir / "results.csv").open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
-    assert len(rows) == 6
+    assert len(rows) == 16
     ours = [row for row in rows if row["workload_name"] == "AAFLOW+"][0]
     dense = [row for row in rows if row["workload_name"] == "dense_prefill"][0]
     assert float(ours["kv_reuse_ratio"]) > float(dense["kv_reuse_ratio"])
@@ -130,7 +139,7 @@ def test_multi_llm_runner_accepts_yaml_config(tmp_path):
     )
 
     payload = json.loads(proc.stdout)
-    assert payload["rows"] == 2
+    assert payload["rows"] == 6
     assert (output_dir / "results.csv").exists()
 
 
@@ -144,7 +153,7 @@ def test_multi_llm_runner_skips_contexts_beyond_model_limit(tmp_path):
             "--models",
             "gpt2",
             "--backend",
-            "hf,vllm",
+            "hf,vllm,sglang",
             "--context-grid",
             "1024",
             "--output-grid",
@@ -166,9 +175,9 @@ def test_multi_llm_runner_skips_contexts_beyond_model_limit(tmp_path):
     )
 
     payload = json.loads(proc.stdout)
-    assert payload["rows"] == 3
+    assert payload["rows"] == 8
     assert "skipped" in proc.stderr
     raw_rows = [json.loads(line) for line in (output_dir / "results_raw.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert len(raw_rows) == 3
+    assert len(raw_rows) == 8
     assert all(row["skipped"] is True for row in raw_rows)
     assert all("exceeds max context" in row["reason"] for row in raw_rows)

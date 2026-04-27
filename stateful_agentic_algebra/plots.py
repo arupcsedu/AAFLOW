@@ -35,6 +35,7 @@ PLOT_SPECS = [
 ]
 
 REAL_LLM_PLOT_SPECS = [
+    ("real_ttft_vs_context_by_baseline", "TTFT vs Context Length by Baseline"),
     ("real_ttft_vs_context_by_model", "TTFT vs Context Length by Model"),
     ("real_ttft_speedup_over_dense", "TTFT Speedup over Dense Prefill"),
     ("real_transfer_recompute_crossover", "Transfer/Recompute Crossover by Model and Bandwidth"),
@@ -105,6 +106,7 @@ def generate_real_llm_plots(results: str | Path | Sequence[dict[str, Any]], outp
     plt = _matplotlib()
     saved: list[Path] = []
     plotters: list[tuple[str, Callable[[Any, list[dict[str, Any]], Path], list[Path]]]] = [
+        ("real_ttft_vs_context_by_baseline", _plot_real_ttft_vs_context_by_baseline),
         ("real_ttft_vs_context_by_model", _plot_real_ttft_vs_context_by_model),
         ("real_ttft_speedup_over_dense", _plot_real_ttft_speedup_over_dense),
         ("real_transfer_recompute_crossover", _plot_real_transfer_recompute_crossover),
@@ -143,7 +145,7 @@ def plot_metric_bar(path: str | Path, metrics: Dict[str, float], title: str = "S
 
 def _plot_ttft_vs_context(plt: Any, rows: list[dict[str, Any]], stem: Path) -> list[Path]:
     fig, ax = _figure(plt)
-    grouped = _group_xy(rows, x_key="context_tokens", y_key="ttft_sec", series_key="baseline_name")
+    grouped = _group_xy(rows, x_key="context_tokens", y_key="ttft_sec", series_key="baseline")
     _plot_lines(ax, grouped)
     _finish_xy(ax, "Context Length (tokens)", "TTFT (s)", "TTFT vs Context Length")
     return _save_all(plt, fig, stem)
@@ -151,7 +153,7 @@ def _plot_ttft_vs_context(plt: Any, rows: list[dict[str, Any]], stem: Path) -> l
 
 def _plot_latency_vs_agents(plt: Any, rows: list[dict[str, Any]], stem: Path) -> list[Path]:
     fig, ax = _figure(plt)
-    grouped = _group_xy(rows, x_key="num_agents", y_key="total_latency_sec", series_key="baseline_name")
+    grouped = _group_xy(rows, x_key="num_agents", y_key="total_latency_sec", series_key="baseline")
     _plot_lines(ax, grouped)
     _finish_xy(ax, "Number of Agents", "Total Latency (s)", "Total Latency vs Number of Agents")
     return _save_all(plt, fig, stem)
@@ -162,8 +164,8 @@ def _plot_transfer_recompute(plt: Any, rows: list[dict[str, Any]], stem: Path) -
     crossover = [
         row for row in rows if row.get("workload_name") == "transfer_recompute_crossover"
     ] or rows
-    grouped_transfer = _group_xy(crossover, x_key="context_tokens", y_key="transfer_sec", series_key="baseline_name")
-    grouped_prefill = _group_xy(crossover, x_key="context_tokens", y_key="prefill_sec", series_key="baseline_name")
+    grouped_transfer = _group_xy(crossover, x_key="context_tokens", y_key="transfer_sec", series_key="baseline")
+    grouped_prefill = _group_xy(crossover, x_key="context_tokens", y_key="prefill_sec", series_key="baseline")
     for label, points in grouped_transfer.items():
         x, y = _sorted_points(points)
         ax.plot(x, y, marker="o", linewidth=2.0, label=f"{label} transfer")
@@ -176,7 +178,7 @@ def _plot_transfer_recompute(plt: Any, rows: list[dict[str, Any]], stem: Path) -
 
 def _plot_memory_vs_branch(plt: Any, rows: list[dict[str, Any]], stem: Path) -> list[Path]:
     fig, ax = _figure(plt)
-    grouped = _group_xy(rows, x_key="branch_factor", y_key="kv_peak_bytes", series_key="baseline_name", y_scale=1.0 / (1024 * 1024))
+    grouped = _group_xy(rows, x_key="branch_factor", y_key="kv_peak_bytes", series_key="baseline", y_scale=1.0 / (1024 * 1024))
     _plot_lines(ax, grouped)
     _finish_xy(ax, "Branch Factor", "Peak KV Memory (MiB)", "KV Memory Footprint vs Branch Factor")
     return _save_all(plt, fig, stem)
@@ -184,7 +186,7 @@ def _plot_memory_vs_branch(plt: Any, rows: list[dict[str, Any]], stem: Path) -> 
 
 def _plot_throughput_vs_requests(plt: Any, rows: list[dict[str, Any]], stem: Path) -> list[Path]:
     fig, ax = _figure(plt)
-    grouped = _group_xy(rows, x_key="num_requests", y_key="throughput_tokens_per_sec", series_key="baseline_name")
+    grouped = _group_xy(rows, x_key="num_requests", y_key="throughput_tokens_per_sec", series_key="baseline")
     _plot_lines(ax, grouped)
     _finish_xy(ax, "Number of Requests", "Throughput (tokens/s)", "Throughput vs Number of Requests")
     return _save_all(plt, fig, stem)
@@ -192,7 +194,7 @@ def _plot_throughput_vs_requests(plt: Any, rows: list[dict[str, Any]], stem: Pat
 
 def _plot_omega_by_baseline(plt: Any, rows: list[dict[str, Any]], stem: Path) -> list[Path]:
     fig, ax = _figure(plt, width=8.5, height=4.8)
-    grouped = _group_values(rows, group_key="baseline_name", value_key="omega_sec")
+    grouped = _group_values(rows, group_key="baseline", value_key="omega_sec")
     labels, values = _bar_values(grouped)
     ax.bar(labels, values, color=_palette(len(labels)))
     ax.set_ylabel("Framework Overhead Omega (s)")
@@ -215,6 +217,31 @@ def _plot_reuse_by_workload(plt: Any, rows: list[dict[str, Any]], stem: Path) ->
     ax.tick_params(axis="x", rotation=25)
     fig.tight_layout()
     return _save_all(plt, fig, stem)
+
+
+def _plot_real_ttft_vs_context_by_baseline(plt: Any, rows: list[dict[str, Any]], stem: Path) -> list[Path]:
+    fig, ax = _figure(plt)
+    source = [
+        row
+        for row in rows
+        if _row_usable(row)
+        and _number(row.get("ttft_sec")) is not None
+        and _baseline_label(row)
+    ]
+    model_ids = {str(row.get("model_id") or "unknown") for row in source}
+    normalized = []
+    for row in source:
+        copied = dict(row)
+        baseline = _baseline_label(row) or "unknown"
+        if len(model_ids) > 1:
+            copied["_baseline_label"] = f"{_short_label(str(row.get('model_id') or 'unknown'))} / {baseline}"
+        else:
+            copied["_baseline_label"] = baseline
+        normalized.append(copied)
+    grouped = _group_xy(normalized, x_key="context_tokens", y_key="ttft_sec", series_key="_baseline_label")
+    _plot_lines(ax, grouped)
+    _finish_real_xy(ax, grouped, "Context Length (tokens)", "TTFT (s)", "TTFT vs Context Length by Baseline")
+    return _save_png_pdf(plt, fig, stem)
 
 
 def _plot_real_ttft_vs_context_by_model(plt: Any, rows: list[dict[str, Any]], stem: Path) -> list[Path]:
@@ -246,8 +273,9 @@ def _plot_real_transfer_recompute_crossover(plt: Any, rows: list[dict[str, Any]]
         )
         recompute = _group_xy(rows, x_key="context_tokens", y_key="t_recompute_sec", series_key="model_id")
     else:
-        transfer = _group_xy(_real_primary_rows(rows), x_key="context_tokens", y_key="transfer_sec", series_key="model_id")
-        recompute = _group_xy(_real_primary_rows(rows), x_key="context_tokens", y_key="dense_prefill_sec", series_key="model_id")
+        baseline_rows = _real_baseline_rows(rows)
+        transfer = _group_xy(baseline_rows, x_key="context_tokens", y_key="transfer_sec", series_key="baseline")
+        recompute = _group_xy(baseline_rows, x_key="context_tokens", y_key="dense_prefill_sec", series_key="baseline")
 
     colors = _palette(max(1, len(transfer)))
     for idx, (label, points) in enumerate(transfer.items()):
@@ -264,7 +292,7 @@ def _plot_real_transfer_recompute_crossover(plt: Any, rows: list[dict[str, Any]]
 def _plot_real_kv_memory_vs_context(plt: Any, rows: list[dict[str, Any]], stem: Path) -> list[Path]:
     fig, ax = _figure(plt)
     normalized = []
-    for row in _real_primary_rows(rows) or rows:
+    for row in _real_baseline_rows(rows) or _real_primary_rows(rows) or rows:
         memory = _first_number(row, ("kv_total_bytes", "kv_peak_bytes", "kv_bytes"))
         context = _number(row.get("context_tokens"))
         if memory is None or context is None:
@@ -272,7 +300,7 @@ def _plot_real_kv_memory_vs_context(plt: Any, rows: list[dict[str, Any]], stem: 
         copied = dict(row)
         copied["_kv_memory_mib"] = memory / (1024 * 1024)
         normalized.append(copied)
-    grouped = _group_xy(normalized, x_key="context_tokens", y_key="_kv_memory_mib", series_key="model_id")
+    grouped = _group_xy(normalized, x_key="context_tokens", y_key="_kv_memory_mib", series_key="baseline")
     _plot_lines(ax, grouped)
     _finish_real_xy(ax, grouped, "Context Length (tokens)", "KV Memory (MiB)", "KV Memory Footprint vs Context Length")
     return _save_png_pdf(plt, fig, stem)
@@ -403,9 +431,24 @@ def _style_axis(ax: Any) -> None:
 
 def _plot_lines(ax: Any, grouped: dict[str, list[tuple[float, float]]]) -> None:
     colors = _palette(len(grouped))
+    linestyles = ["-", "--", "-.", ":", (0, (5, 1)), (0, (3, 1, 1, 1)), (0, (1, 1))]
+    markers = ["o", "s", "^", "D", "v", "P", "X", "*"]
+    offsets = _series_x_offsets(grouped)
     for idx, (label, points) in enumerate(grouped.items()):
         x, y = _sorted_points(points)
-        ax.plot(x, y, marker="o", linewidth=2.0, color=colors[idx], label=label)
+        offset = offsets.get(label, 0.0)
+        x_plot = [value + offset for value in x]
+        ax.plot(
+            x_plot,
+            y,
+            marker=markers[idx % len(markers)],
+            markersize=5.5,
+            linewidth=2.0,
+            linestyle=linestyles[idx % len(linestyles)],
+            color=colors[idx],
+            label=label,
+            alpha=0.95,
+        )
 
 
 def _annotate_no_data(ax: Any) -> None:
@@ -434,7 +477,9 @@ def _group_xy(
         y = _number(row.get(y_key))
         if x is None or y is None:
             continue
-        label = str(row.get(series_key) or "unknown")
+        label = _series_label(row, series_key)
+        if not label:
+            continue
         buckets[(label, x)].append(y * y_scale)
     grouped: dict[str, list[tuple[float, float]]] = defaultdict(list)
     for (label, x), values in buckets.items():
@@ -472,7 +517,10 @@ def _group_values(rows: list[dict[str, Any]], *, group_key: str, value_key: str)
         value = _number(row.get(value_key))
         if value is None:
             continue
-        grouped[str(row.get(group_key) or "unknown")].append(value)
+        label = _series_label(row, group_key)
+        if not label:
+            continue
+        grouped[label].append(value)
     return dict(sorted(grouped.items(), key=lambda item: item[0]))
 
 
@@ -485,6 +533,26 @@ def _bar_values(grouped: dict[str, list[float]]) -> tuple[list[str], list[float]
 def _sorted_points(points: list[tuple[float, float]]) -> tuple[list[float], list[float]]:
     ordered = sorted(points, key=lambda item: item[0])
     return [item[0] for item in ordered], [item[1] for item in ordered]
+
+
+def _series_x_offsets(grouped: dict[str, list[tuple[float, float]]]) -> dict[str, float]:
+    """Return tiny visual x-offsets so coincident baseline curves remain visible."""
+
+    if len(grouped) <= 1:
+        return {}
+    all_x = sorted({x for points in grouped.values() for x, _y in points})
+    if len(all_x) > 1:
+        min_gap = min(b - a for a, b in zip(all_x, all_x[1:]) if b > a)
+        step = min_gap * 0.008
+    else:
+        step = max(abs(all_x[0]) * 0.01, 0.02) if all_x else 0.0
+    if step == 0.0:
+        return {}
+
+    labels = list(grouped)
+    center = (len(labels) - 1) / 2.0
+    offsets = {label: (idx - center) * step for idx, label in enumerate(labels)}
+    return offsets
 
 
 def _number(value: Any) -> float | None:
@@ -538,6 +606,43 @@ def _real_primary_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         )
     ]
     return primary or [row for row in rows if _row_usable(row)]
+
+
+def _real_baseline_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in rows
+        if _row_usable(row)
+        and _baseline_label(row)
+        and _number(row.get("context_tokens")) is not None
+    ]
+
+
+BASELINE_WORKLOAD_NAMES = {
+    "AAFLOW+",
+    "aaflow_plus",
+    "dense_prefill",
+    "aaflow_text",
+    "vllm_local_prefix",
+    "sglang_prefix",
+    "distserve_style",
+}
+
+
+def _baseline_label(row: dict[str, Any]) -> str:
+    baseline = str(row.get("baseline_name") or "").strip()
+    if baseline:
+        return baseline
+    workload = str(row.get("workload_name") or "").strip()
+    if workload in BASELINE_WORKLOAD_NAMES:
+        return workload
+    return ""
+
+
+def _series_label(row: dict[str, Any], series_key: str) -> str:
+    if series_key == "baseline":
+        return _baseline_label(row)
+    return str(row.get(series_key) or "").strip()
 
 
 def _real_speedup_points(rows: list[dict[str, Any]]) -> dict[str, list[tuple[float, float]]]:
@@ -605,6 +710,10 @@ def _palette(n: int) -> list[str]:
     if n <= len(colors):
         return colors[:n]
     return [colors[idx % len(colors)] for idx in range(n)]
+
+
+def _short_label(value: str) -> str:
+    return value.rsplit("/", 1)[-1] if "/" in value else value
 
 
 def _save_all(plt: Any, fig: Any, stem: Path) -> list[Path]:

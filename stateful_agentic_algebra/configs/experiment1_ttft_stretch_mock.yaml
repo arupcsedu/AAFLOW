@@ -1,0 +1,28 @@
+baselines:
+  - AAFLOW+
+  - dense_prefill
+  - aaflow_text
+  - vllm_local_prefix
+  - sglang_prefix
+  - distserve_style
+workloads:
+  - rag_shared_context
+context_grid:
+  - 1024
+  - 2048
+  - 4096
+  - 8192
+  - 16384
+  - 32768
+output_grid:
+  - 64
+agent_grid:
+  - 8
+branch_grid:
+  - 4
+num_requests: 10
+backend_type: mock
+model_id: mock-model
+tokenizer_id: mock-tokenizer
+seed: 0
+output_dir: runs/stateful/experiment1_ttft_stretch_mock

@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH -A bii_dsc_community
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:a100:1
 #SBATCH --mem=128G
 #SBATCH --time=06:00:00
 #SBATCH --output=/project/bi_dsc_community/drc_rag/stateful_agentic_algebra/slurm/slurm-%x-%j.out
@@ -15,8 +15,7 @@ set -euo pipefail
 export SLURM_CPU_BIND=none
 
 # Override the generic GPU request at submit time for a specific accelerator:
-#   sbatch --gres=gpu:a100:1 ...
-#   sbatch --gres=gpu:h100:1 ...
+#   sbatch -p gpu --gres=gpu:a100:1 ...
 
 PROJECT_ROOT="${PROJECT_ROOT:-/project/bi_dsc_community/drc_rag}"
 PYTHON_BIN="${PYTHON_BIN:-/scratch/djy8hg/env/saa_vllm_env/bin/python}"

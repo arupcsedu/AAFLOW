@@ -1,7 +1,15 @@
 import csv
 import subprocess
 
-from stateful_agentic_algebra.plots import PLOT_SPECS, REAL_LLM_PLOT_SPECS, generate_all_plots, generate_real_llm_plots
+from stateful_agentic_algebra.plots import (
+    PLOT_SPECS,
+    REAL_LLM_PLOT_SPECS,
+    _group_xy,
+    _real_baseline_rows,
+    generate_all_plots,
+    generate_real_llm_plots,
+    load_results,
+)
 
 
 PYTHON = "/scratch/djy8hg/env/drc_rag_bench_env/bin/python"
@@ -173,6 +181,75 @@ def write_real_results(path):
             "kv_total_bytes": 1048576,
         },
         {
+            "run_id": "r2a",
+            "model_id": "gpt2",
+            "backend": "hf_measured",
+            "workload_name": "aaflow_text",
+            "context_tokens": 1024,
+            "output_tokens": 32,
+            "num_agents": 2,
+            "branch_factor": 2,
+            "num_prompts": 4,
+            "available": True,
+            "skipped": False,
+            "ttft_sec": 1.6,
+            "prefill_sec": 1.6,
+            "dense_prefill_sec": 1.6,
+            "kv_total_bytes": 1048576,
+        },
+        {
+            "run_id": "r2b",
+            "model_id": "gpt2",
+            "backend": "hf_measured",
+            "workload_name": "vllm_local_prefix",
+            "context_tokens": 1024,
+            "output_tokens": 32,
+            "num_agents": 2,
+            "branch_factor": 2,
+            "num_prompts": 4,
+            "available": True,
+            "skipped": False,
+            "ttft_sec": 0.8,
+            "prefill_sec": 0.8,
+            "dense_prefill_sec": 1.6,
+            "kv_total_bytes": 1048576,
+        },
+        {
+            "run_id": "r2c",
+            "model_id": "gpt2",
+            "backend": "hf_measured",
+            "workload_name": "sglang_prefix",
+            "context_tokens": 1024,
+            "output_tokens": 32,
+            "num_agents": 2,
+            "branch_factor": 2,
+            "num_prompts": 4,
+            "available": True,
+            "skipped": False,
+            "ttft_sec": 0.8,
+            "prefill_sec": 0.8,
+            "dense_prefill_sec": 1.6,
+            "kv_total_bytes": 1048576,
+        },
+        {
+            "run_id": "r2d",
+            "model_id": "gpt2",
+            "backend": "hf_measured",
+            "workload_name": "distserve_style",
+            "context_tokens": 1024,
+            "output_tokens": 32,
+            "num_agents": 2,
+            "branch_factor": 2,
+            "num_prompts": 4,
+            "available": True,
+            "skipped": False,
+            "ttft_sec": 0.7,
+            "prefill_sec": 0.8,
+            "dense_prefill_sec": 1.6,
+            "transfer_sec": 0.1,
+            "kv_total_bytes": 1048576,
+        },
+        {
             "run_id": "r3",
             "model_id": "gpt2",
             "backend": "vllm",
@@ -232,6 +309,23 @@ def test_generate_real_llm_plots_writes_png_and_pdf(tmp_path):
             assert path.stat().st_size > 0
 
 
+def test_real_llm_plot_grouping_includes_all_available_baselines(tmp_path):
+    results = tmp_path / "real_results.csv"
+    write_real_results(results)
+
+    rows = _real_baseline_rows(load_results(results))
+    grouped = _group_xy(rows, x_key="context_tokens", y_key="ttft_sec", series_key="baseline")
+
+    assert set(grouped) == {
+        "AAFLOW+",
+        "aaflow_text",
+        "dense_prefill",
+        "distserve_style",
+        "sglang_prefix",
+        "vllm_local_prefix",
+    }
+
+
 def test_real_llm_plots_cli(tmp_path):
     results = tmp_path / "real_results.csv"
     output_dir = tmp_path / "figures"
@@ -254,5 +348,5 @@ def test_real_llm_plots_cli(tmp_path):
         text=True,
     )
 
-    assert "wrote 16 files" in proc.stdout
+    assert "wrote 18 files" in proc.stdout
     assert (output_dir / "real_ttft_vs_context_by_model.png").exists()

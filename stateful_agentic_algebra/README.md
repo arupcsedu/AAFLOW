@@ -257,6 +257,24 @@ $PYTHON_BIN -m stateful_agentic_algebra.vllm_benchmark \
   --output-dir runs/stateful/vllm_llama3_8b
 ```
 
+SGLang serving benchmark:
+
+```bash
+export SGLANG_PYTHON_BIN=/scratch/djy8hg/env/drc_rag_bench_env/bin/python
+$PYTHON_BIN -m stateful_agentic_algebra.sglang_benchmark \
+  --model-id gpt2 \
+  --input-len 512 \
+  --output-len 32 \
+  --num-prompts 8 \
+  --tensor-parallel-size 1 \
+  --python-bin "$SGLANG_PYTHON_BIN" \
+  --output-dir runs/stateful/sglang_gpt2
+```
+
+SGLang and vLLM often need different pinned Python packages. Keep using
+`PYTHON_BIN=/scratch/djy8hg/env/saa_vllm_env/bin/python` for the main runner and
+set `SGLANG_PYTHON_BIN` when SGLang is installed in a separate environment.
+
 Multi-model sweep:
 
 ```bash
@@ -272,7 +290,8 @@ export BACKEND='hf'
 export CONTEXT_GRID='512'
 export OUTPUT_GRID='64'
 export NUM_PROMPTS='4'
-sbatch --export=ALL stateful_agentic_algebra/slurm/run_real_llm_sweep.sbatch
+sbatch -p gpu --gres=gpu:a100:1 --export=ALL \
+  stateful_agentic_algebra/slurm/run_real_llm_sweep.sbatch
 ```
 
 For comma-separated grids, always export variables first so Slurm does not split
@@ -280,12 +299,20 @@ For comma-separated grids, always export variables first so Slurm does not split
 
 ```bash
 export MODEL_ID='gpt2,mistralai/Mistral-7B-Instruct-v0.3'
-export BACKEND='hf,vllm'
+export BACKEND='hf,vllm,sglang'
+export SGLANG_PYTHON_BIN=/scratch/djy8hg/env/drc_rag_bench_env/bin/python
 export CONTEXT_GRID='512,960'
 export OUTPUT_GRID='64'
 export NUM_PROMPTS='8'
-sbatch --export=ALL stateful_agentic_algebra/slurm/run_real_llm_sweep.sbatch
+sbatch -p gpu --gres=gpu:a100:1 --export=ALL \
+  stateful_agentic_algebra/slurm/run_real_llm_sweep.sbatch
 ```
+
+For SGLang on this cluster, use the A100 `gpu` partition. V100 nodes are below
+SGLang's current minimum compute capability, and SGLang's JIT kernels need a
+newer host compiler. The sweep script loads `gcc/12.4.0` and `cuda/12.8.0` by
+default and passes `--disable-overlap-schedule --disable-cuda-graph` to avoid
+the JIT paths that fail under the system GCC 8 toolchain.
 
 Gated Hugging Face models require access approval and:
 
@@ -421,7 +448,9 @@ Plotting:
 ## Troubleshooting Optional Dependencies
 
 - Missing vLLM: vLLM benchmarks are skipped unless `--require-vllm` is used.
-- Missing SGLang: `sglang_prefix` falls back to simulated prefix metrics.
+- Missing SGLang: `sglang_prefix` falls back to simulated prefix metrics, and
+  the real `sglang` backend is skipped unless SGLang is available through
+  `SGLANG_PYTHON_BIN` or the active Python environment.
 - Missing Hugging Face packages: mock mode still works; install
   `transformers`, `torch`, and `huggingface_hub` for HF runs.
 - Gated model access: request access on Hugging Face and export
@@ -449,6 +478,7 @@ Plotting:
 - `experiment_runner.py`: config and CLI runner.
 - `hf_kv_backend.py`: Hugging Face KV measurement backend.
 - `vllm_benchmark.py`: vLLM server/bench wrapper.
+- `sglang_benchmark.py`: SGLang server/bench wrapper.
 - `multi_llm_runner.py`: real-model benchmark matrix.
 - `transfer_crossover_real.py`: KV transfer/recompute crossover analysis.
 - `consistency_benchmark.py`: dense-vs-cached consistency measurement.
