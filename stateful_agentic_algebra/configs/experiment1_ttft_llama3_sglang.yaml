@@ -1,0 +1,23 @@
+models:
+  - meta-llama/Meta-Llama-3-8B-Instruct
+backends:
+  - sglang
+context_grid:
+  - 1024
+  - 2048
+  - 4096
+  - 6144
+  - 7168
+  - 8064
+output_grid:
+  - 64
+agent_grid:
+  - 8
+branch_grid:
+  - 4
+num_prompts: 8
+num_requests: 1
+seeds:
+  - 0
+tensor_parallel_size: 1
+output_dir: runs/stateful/experiment1_ttft_llama3_sglang

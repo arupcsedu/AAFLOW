@@ -104,6 +104,19 @@ def launch_sglang_server(
         raise
 
 
+def find_available_port(start_port: int, attempts: int = 200) -> int:
+    """Return the first locally bindable TCP port at or above ``start_port``."""
+
+    base = max(1, int(start_port))
+    for offset in range(max(1, int(attempts))):
+        port = base + offset
+        if port > 65535:
+            break
+        if _port_is_available(port):
+            return port
+    raise RuntimeError(f"no free localhost port found in range {base}-{min(65535, base + attempts - 1)}")
+
+
 def wait_for_server(port: int, timeout_sec: float = 600.0, poll_interval_sec: float = 2.0) -> bool:
     """Wait until the SGLang HTTP server responds."""
 
@@ -113,6 +126,47 @@ def wait_for_server(port: int, timeout_sec: float = 600.0, poll_interval_sec: fl
         f"http://localhost:{int(port)}/health",
     ]
     while time.time() < deadline:
+        for url in health_urls:
+            try:
+                with urlopen(url, timeout=2.0) as response:
+                    if 200 <= int(response.status) < 300:
+                        return True
+            except (HTTPError, URLError, TimeoutError, OSError, socket.timeout):
+                pass
+        time.sleep(float(poll_interval_sec))
+    return False
+
+
+def wait_for_launched_server(
+    port: int,
+    process: subprocess.Popen[Any],
+    timeout_sec: float = 600.0,
+    poll_interval_sec: float = 2.0,
+    stderr_path: Optional[str | Path] = None,
+) -> bool:
+    """Wait for a launched SGLang server and fail fast on process/port errors."""
+
+    deadline = time.time() + float(timeout_sec)
+    health_urls = [
+        f"http://127.0.0.1:{int(port)}/health",
+        f"http://localhost:{int(port)}/health",
+    ]
+    last_stderr_size = 0
+    while time.time() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError(
+                f"SGLang server exited before readiness on port {port} "
+                f"with code {process.returncode}: {_tail_file(stderr_path)}"
+            )
+        stderr_text = _tail_file(stderr_path, max_bytes=4096, start_at=last_stderr_size)
+        if stderr_path:
+            try:
+                last_stderr_size = max(last_stderr_size, Path(stderr_path).stat().st_size)
+            except OSError:
+                pass
+        lowered = stderr_text.lower()
+        if "address already in use" in lowered or "error while attempting to bind" in lowered:
+            raise RuntimeError(f"SGLang server failed to bind port {port}: {_tail_file(stderr_path)}")
         for url in health_urls:
             try:
                 with urlopen(url, timeout=2.0) as response:
@@ -276,25 +330,36 @@ def run_cli(args: argparse.Namespace) -> int:
 
     server: Optional[subprocess.Popen[Any]] = None
     try:
+        actual_port = find_available_port(args.port)
+        if actual_port != int(args.port):
+            print(f"SGLang port {args.port} is busy; using free port {actual_port}", file=sys.stderr)
+            config["requested_port"] = args.port
+            config["port"] = actual_port
+            (output_dir / "config.json").write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
         server = launch_sglang_server(
             model_id=args.model_id,
             tensor_parallel_size=args.tensor_parallel_size,
-            port=args.port,
+            port=actual_port,
             extra_args=args.extra_args,
             stdout_path=output_dir / "sglang_stdout.log",
             stderr_path=output_dir / "sglang_stderr.log",
             python_bin=args.python_bin,
         )
-        ready = wait_for_server(args.port, timeout_sec=args.server_timeout_sec)
+        ready = wait_for_launched_server(
+            actual_port,
+            server,
+            timeout_sec=args.server_timeout_sec,
+            stderr_path=output_dir / "sglang_stderr.log",
+        )
         if not ready:
-            raise RuntimeError(f"SGLang server did not become ready on port {args.port}")
+            raise RuntimeError(f"SGLang server did not become ready on port {actual_port}")
         metrics = run_sglang_bench_serve(
             model_id=args.model_id,
             input_len=args.input_len,
             output_len=args.output_len,
             num_prompts=args.num_prompts,
             request_rate=args.request_rate,
-            port=args.port,
+            port=actual_port,
             output_dir=output_dir,
             timeout_sec=args.bench_timeout_sec,
             python_bin=args.python_bin,
@@ -356,10 +421,36 @@ def terminate_process_tree(process: subprocess.Popen[Any], timeout_sec: float = 
             pass
 
 
+def _port_is_available(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("127.0.0.1", int(port)))
+        except OSError:
+            return False
+    return True
+
+
+def _tail_file(path: Optional[str | Path], max_bytes: int = 2048, start_at: int = 0) -> str:
+    if not path:
+        return ""
+    try:
+        p = Path(path)
+        with p.open("rb") as handle:
+            if start_at > 0:
+                handle.seek(start_at)
+                data = handle.read(max_bytes)
+            else:
+                handle.seek(0, os.SEEK_END)
+                size = handle.tell()
+                handle.seek(max(0, size - max_bytes))
+                data = handle.read(max_bytes)
+        return data.decode("utf-8", errors="replace").strip()
+    except Exception:
+        return ""
+
+
 def _sglang_server_base(python_bin: str | None) -> list[str]:
-    executable = _sglang_executable(python_bin)
-    if executable:
-        return [executable, "serve"]
     python = python_bin or sys.executable
     return [python, "-m", "sglang.launch_server"]
 
@@ -451,7 +542,7 @@ def _run_http_fallback(
     port: int,
     timeout_sec: float,
 ) -> dict[str, Any]:
-    prompt = _synthetic_prompt(input_len)
+    prompt = _synthetic_prompt(input_len, model_id=model_id)
     latencies: list[float] = []
     generated_tokens = 0
     started = time.perf_counter()
@@ -494,10 +585,78 @@ def _run_http_fallback(
         "successful_requests": len(latencies),
     }
 
+def _synthetic_prompt(input_len: int, model_id: str | None = None) -> str:
+    """Build a synthetic prompt that does not exceed ``input_len`` tokens.
 
-def _synthetic_prompt(input_len: int) -> str:
+    SGLang validates requests after tokenization.  The old fallback generated
+    ``input_len`` whitespace-delimited words, which can tokenize to more than
+    ``input_len`` model tokens for SentencePiece/BPE tokenizers and caused
+    HTTP 400 errors near the context limit.  When Transformers is available,
+    generate through the model tokenizer and trim until re-tokenization fits.
+    """
+
+    target_tokens = max(1, int(input_len))
+    if model_id:
+        tokenized = _token_bounded_prompt(model_id, target_tokens)
+        if tokenized:
+            return tokenized
+    # Conservative fallback when tokenizer loading is unavailable.
+    return _synthetic_prompt_text(max(1, target_tokens // 2))
+
+
+def _token_bounded_prompt(model_id: str, target_tokens: int) -> str:
+    try:
+        from transformers import AutoTokenizer
+    except Exception:
+        return ""
+
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_id, token=_hf_token())
+    except Exception:
+        return ""
+
+    seed_text = " stateful agentic algebra benchmark prefix cache serving latency"
+    seed_ids = tokenizer.encode(seed_text, add_special_tokens=False)
+    if not seed_ids:
+        return ""
+
+    ids = (seed_ids * ((target_tokens // len(seed_ids)) + 2))[:target_tokens]
+    for _ in range(128):
+        if not ids:
+            break
+        prompt = tokenizer.decode(ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)
+        encoded = tokenizer.encode(prompt, add_special_tokens=False)
+        if 0 < len(encoded) <= target_tokens:
+            return prompt
+        trim_by = max(1, len(encoded) - target_tokens)
+        if trim_by >= len(ids):
+            ids = ids[:-1]
+        else:
+            ids = ids[:-trim_by]
+    return ""
+
+
+def _synthetic_prompt_text(word_count: int) -> str:
     words = ["stateful", "agentic", "algebra", "benchmark", "prefix", "cache", "serving", "latency"]
-    return " ".join(words[idx % len(words)] for idx in range(max(1, int(input_len))))
+    return " ".join(words[idx % len(words)] for idx in range(max(1, int(word_count))))
+
+
+def _hf_token() -> str | None:
+    token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+    if token:
+        return token.strip()
+    token_file = Path.home() / ".hf_token"
+    if not token_file.exists():
+        return None
+    try:
+        text = token_file.read_text(encoding="utf-8")
+    except Exception:
+        return None
+    match = re.search(r"HF_TOKEN=([^\n\r\s;]+)", text)
+    if match:
+        return match.group(1).strip().strip("\"'")
+    stripped = text.strip()
+    return stripped if stripped.startswith("hf_") else None
 
 
 def _normalize_label(label: str) -> str:

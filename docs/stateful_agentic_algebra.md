@@ -37,6 +37,17 @@ Use this module when evaluating:
 
 ## Smoke Test
 
+Set local paths once before running commands:
+
+```bash
+export PRJ_PATH=/path/to/AAFLOW
+export ENV_PATH=/path/to/python/envs
+export DATA_PATH=/path/to/scratch_or_data
+source stateful_agentic_algebra/env.sh
+cd "$PRJ_PATH"
+export PYTHONPATH="$PRJ_PATH:${PYTHONPATH:-}"
+```
+
 Run from the repository root:
 
 ```bash
@@ -232,9 +243,9 @@ Before downloading large Hugging Face models, move the cache away from home
 storage:
 
 ```bash
-export HF_HOME=/scratch/$USER/huggingface
-export HUGGINGFACE_HUB_CACHE=/scratch/$USER/huggingface/hub
-export TRANSFORMERS_CACHE=/scratch/$USER/huggingface/transformers
+export HF_HOME=$DATA_PATH/huggingface
+export HUGGINGFACE_HUB_CACHE=$DATA_PATH/huggingface/hub
+export TRANSFORMERS_CACHE=$DATA_PATH/huggingface/transformers
 mkdir -p "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE"
 ```
 

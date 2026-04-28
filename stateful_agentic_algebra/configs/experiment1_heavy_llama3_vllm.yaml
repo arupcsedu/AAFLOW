@@ -1,0 +1,21 @@
+models:
+  - meta-llama/Meta-Llama-3-8B-Instruct
+backends:
+  - vllm
+context_grid:
+  - 2048
+  - 4096
+  - 6144
+  - 7936
+output_grid:
+  - 128
+agent_grid:
+  - 16
+branch_grid:
+  - 8
+num_prompts: 32
+num_requests: 1
+seeds:
+  - 0
+tensor_parallel_size: 2
+output_dir: runs/stateful/experiment1_heavy_llama3_vllm

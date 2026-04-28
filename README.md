@@ -100,16 +100,20 @@ For semantic comparisons, use `raw`.
 Use the existing benchmark environment:
 
 ```bash
+export PRJ_PATH=/path/to/AAFLOW
+export ENV_PATH=/scratch/$USER/env
+export DATA_PATH=/scratch/$USER/stateful_aaflow
+source stateful_agentic_algebra/env.sh
 module load miniforge/24.3.0-py3.11
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate /scratch/djy8hg/env/drc_rag_bench_env
-cd /project/bi_dsc_community/drc_rag
+conda activate "$ENV_PATH/drc_rag_bench_env"
+cd "$PRJ_PATH"
 ```
 
 Recommended Python:
 
 ```bash
-/scratch/djy8hg/env/drc_rag_bench_env/bin/python
+$ENV_PATH/drc_rag_bench_env/bin/python
 ```
 
 ### Optional Package Installation
@@ -117,7 +121,7 @@ Recommended Python:
 If you need to rebuild the environment:
 
 ```bash
-/scratch/djy8hg/env/drc_rag_bench_env/bin/pip install \
+$ENV_PATH/drc_rag_bench_env/bin/pip install \
   llama-index chromadb "ray[data]" "dask[distributed]" matplotlib \
   langchain-core langgraph crewai autogen transformers torch faiss-cpu
 ```
@@ -125,7 +129,7 @@ If you need to rebuild the environment:
 ### Basic Verification
 
 ```bash
-/scratch/djy8hg/env/drc_rag_bench_env/bin/python - <<'PY'
+$ENV_PATH/drc_rag_bench_env/bin/python - <<'PY'
 import chromadb, ray, dask
 print("environment ok")
 PY
@@ -278,7 +282,7 @@ This is the semantic headline path. It preserves runtime transform and runtime e
 ```bash
 sbatch --nodes=4 --ntasks-per-node=40 \
   --export=ALL,PROFILE=strong_ray_only,PHYSICAL_WORKERS=128,CORES_PER_NODE=40,BASE_NODES=10000000,BASE_FILES=4096,CHUNKS_PER_FILE=100000,RAY_INPUT_FORMAT=raw \
-  /project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch
+  $PRJ_PATH/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch
 ```
 
 ### Scaling: Ray Prechunked Run
@@ -286,7 +290,7 @@ sbatch --nodes=4 --ntasks-per-node=40 \
 ```bash
 sbatch --nodes=4 --ntasks-per-node=40 \
   --export=ALL,PROFILE=strong_ray_only,PHYSICAL_WORKERS=128,CORES_PER_NODE=40,BASE_NODES=10000000,BASE_FILES=4096,CHUNKS_PER_FILE=100000,RAY_INPUT_FORMAT=prechunked \
-  /project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch
+  $PRJ_PATH/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch
 ```
 
 ### Scaling: Aggressive Engineering Ray Run
@@ -296,7 +300,7 @@ This is not the semantic headline result.
 ```bash
 sbatch --nodes=4 --ntasks-per-node=40 \
   --export=ALL,PROFILE=strong_ray_only,PHYSICAL_WORKERS=128,CORES_PER_NODE=40,BASE_NODES=10000000,BASE_FILES=4096,CHUNKS_PER_FILE=100000,RAY_INPUT_FORMAT=preembedded,LOCAL_CORPUS_STAGE=1,LOCAL_CORPUS_ROOT=/tmp/drc_rag_scaling_corpus_cache \
-  /project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch
+  $PRJ_PATH/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch
 ```
 
 ### Scaling: No-Ray Strong Run
@@ -304,7 +308,7 @@ sbatch --nodes=4 --ntasks-per-node=40 \
 ```bash
 sbatch --nodes=4 --ntasks-per-node=40 \
   --export=ALL,PROFILE=strong_no_ray,PHYSICAL_WORKERS=128,CORES_PER_NODE=40,BASE_NODES=10000000,BASE_FILES=4096,CHUNKS_PER_FILE=100000 \
-  /project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch
+  $PRJ_PATH/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch
 ```
 
 ### Scaling: No-Ray Weak Run
@@ -312,7 +316,7 @@ sbatch --nodes=4 --ntasks-per-node=40 \
 ```bash
 sbatch --nodes=4 --ntasks-per-node=40 \
   --export=ALL,PROFILE=weak_no_ray,PHYSICAL_WORKERS=128,CORES_PER_NODE=40,BASE_NODES_PER_WORKER=128,BASE_FILES=4096,CHUNKS_PER_FILE=100000 \
-  /project/bi_dsc_community/drc_rag/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch
+  $PRJ_PATH/benchmark/slurm_scripts/run_agentic_scaling_strong_weak.sbatch
 ```
 
 ### Framework Benchmark
@@ -320,7 +324,7 @@ sbatch --nodes=4 --ntasks-per-node=40 \
 Validated FAISS overlap configuration:
 
 ```bash
-cd /project/bi_dsc_community/drc_rag/framework_rag_pipeline_benchmark
+cd $PRJ_PATH/framework_rag_pipeline_benchmark
 sbatch -p parallel --nodes=2 \
   --export=ALL,PHYSICAL_WORKERS=64,CORES_PER_NODE=40,VECTOR_BACKEND=faiss,NODES=200000,FILES=256,GENERATION_SAMPLES=8 \
   run_framework_pipeline.slurm
@@ -331,10 +335,10 @@ sbatch -p parallel --nodes=2 \
 Validated Higress vs Agentic configuration:
 
 ```bash
-cd /project/bi_dsc_community/drc_rag/higress_agentic_benchmark
+cd $PRJ_PATH/higress_agentic_benchmark
 PHYSICAL_WORKERS=64 \
 CORES_PER_NODE=40 \
-DATA_DIR=/project/bi_dsc_community/drc_rag/higress_agentic_benchmark/sample_wikitext2_2000 \
+DATA_DIR=$PRJ_PATH/higress_agentic_benchmark/sample_wikitext2_2000 \
 QUERY_COUNT=32 \
 REPEAT=5 \
 VECTOR_BACKEND=faiss \

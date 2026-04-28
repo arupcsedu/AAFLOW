@@ -1,0 +1,21 @@
+models:
+  - mistralai/Mistral-7B-Instruct-v0.3
+backends:
+  - sglang
+context_grid:
+  - 8192
+  - 16384
+  - 24576
+  - 30720
+output_grid:
+  - 128
+agent_grid:
+  - 16
+branch_grid:
+  - 8
+num_prompts: 32
+num_requests: 1
+seeds:
+  - 0
+tensor_parallel_size: 2
+output_dir: runs/stateful/experiment1_heavy_mistral_sglang

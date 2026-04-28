@@ -28,4 +28,4 @@ resume_overhead_sec: 0.0001
 omega_state_sec: 0.00005
 omega_text_sec: 0.00005
 hf_device: auto
-output_dir: runs/stateful/experiment1_ttft_stretch_mistral
+output_dir: runs/stateful/experiment1_ttft_mistral_hf

@@ -233,7 +233,7 @@ class HFKVBackend:
         if first_token_id is None:
             raise RuntimeError("run_decode_with_cache requires a next_token_id or a prior run_prefill() call")
 
-        past = self._legacy_past(past_key_values)
+        past = self._cache_for_model(past_key_values)
         next_token = torch.tensor([[int(first_token_id)]], dtype=torch.long, device=self.input_device)
         generated_ids: list[int] = []
         self._synchronize()
@@ -244,7 +244,7 @@ class HFKVBackend:
                 if idx == output_tokens - 1:
                     break
                 outputs = self.model(input_ids=next_token, past_key_values=past, use_cache=True)
-                past = self._legacy_past(outputs.past_key_values)
+                past = self._cache_for_model(outputs.past_key_values)
                 next_token = torch.argmax(outputs.logits[:, -1, :], dim=-1, keepdim=True)
             self._synchronize()
             decode_sec = time.perf_counter() - start
@@ -482,6 +482,20 @@ class HFKVBackend:
         return " ".join([*words, *repeated[: max(0, context_tokens - len(words))]])
 
     def _legacy_past(self, past_key_values: Any) -> Any:
+        return self._legacy_past_static(past_key_values)
+
+    def _cache_for_model(self, past_key_values: Any) -> Any:
+        """Return a cache object accepted by the current Transformers model."""
+
+        if hasattr(past_key_values, "get_seq_length"):
+            return past_key_values
+        try:
+            from transformers.cache_utils import DynamicCache
+
+            if hasattr(DynamicCache, "from_legacy_cache"):
+                return DynamicCache.from_legacy_cache(self._legacy_past_static(past_key_values))
+        except Exception:
+            pass
         return self._legacy_past_static(past_key_values)
 
     @staticmethod

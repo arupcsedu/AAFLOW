@@ -266,6 +266,7 @@ def run_experiment(args: argparse.Namespace) -> dict[str, Any]:
     _write_benchmark_table(output_dir / "benchmark.out", results, skipped)
     _write_json(output_dir / "config.json", config)
     _write_json(output_dir / "skipped_baselines.json", {"skipped_baselines": skipped})
+    _write_summary_out(output_dir / "summary.out", results, skipped, config)
 
     if args.output_json:
         _write_json(Path(args.output_json), payload)
@@ -827,6 +828,158 @@ def _write_benchmark_table(path: Path, results: list[dict[str, Any]], skipped: l
     if not table_rows:
         lines.append("No benchmark rows were produced.")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_summary_out(
+    path: Path,
+    results: list[dict[str, Any]],
+    skipped: list[dict[str, Any]],
+    config: dict[str, Any],
+) -> None:
+    """Write a human-readable run summary with file inventory and speedups."""
+
+    output_dir = path.parent
+    path.parent.mkdir(parents=True, exist_ok=True)
+    resolved = config.get("resolved", {}) if isinstance(config, dict) else {}
+    rows = [*results, *skipped]
+
+    lines = [
+        "Stateful Agentic Algebra Run Summary",
+        "=" * 38,
+        f"Output directory: {output_dir}",
+        f"Rows: {len(rows)}",
+        f"Successful rows: {len(results)}",
+        f"Skipped/unavailable rows: {len(skipped)}",
+        "",
+        "Configuration",
+        "-" * 13,
+    ]
+    for key in [
+        "baselines",
+        "workloads",
+        "context_grid",
+        "output_grid",
+        "agent_grid",
+        "branch_grid",
+        "num_runs",
+        "num_skipped",
+    ]:
+        if key in resolved:
+            lines.append(f"{key}: {resolved[key]}")
+    for key in ["backend", "generation_backend", "output_dir"]:
+        value = config.get(key) if isinstance(config, dict) else None
+        if value not in {None, ""}:
+            lines.append(f"{key}: {value}")
+
+    lines.extend(["", "Output Files", "-" * 12])
+    for rel in [
+        "config.json",
+        "results.json",
+        "results.csv",
+        "skipped_baselines.json",
+        "benchmark.out",
+        "figures",
+        "logs",
+    ]:
+        lines.append(_file_inventory_line(output_dir / rel, rel))
+    lines.append("summary.out: file (this file)")
+
+    lines.extend(["", "Benchmark Summary", "-" * 17])
+    lines.extend(
+        _format_table(
+            [
+                "Baseline",
+                "Workload",
+                "Rows",
+                "TTFT(s)",
+                "AAFLOW+ faster",
+                "Total(s)",
+                "Tok/s",
+                "KV MiB",
+                "Reuse",
+            ],
+            _experiment_summary_rows(results),
+        )
+    )
+
+    if skipped:
+        lines.extend(["", "Skipped / Unavailable Rows", "-" * 26])
+        skipped_table = [
+            [
+                str(row.get("baseline_name", "")),
+                str(row.get("workload_name", "")),
+                str(row.get("context_tokens", "")),
+                str(row.get("num_agents", "")),
+                str(row.get("branch_factor", "")),
+                _short_reason(row.get("reason", "skipped"), limit=72),
+            ]
+            for row in skipped[:50]
+        ]
+        lines.extend(_format_table(["Baseline", "Workload", "Ctx", "Agents", "Branch", "Reason"], skipped_table))
+        if len(skipped) > 50:
+            lines.append(f"... truncated {len(skipped) - 50} additional skipped rows")
+
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _experiment_summary_rows(results: list[dict[str, Any]]) -> list[list[str]]:
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in results:
+        groups.setdefault((str(row.get("baseline_name", "")), str(row.get("workload_name", ""))), []).append(row)
+
+    aaflow_refs: dict[str, float] = {}
+    for (baseline, workload), group_rows in groups.items():
+        if baseline != "AAFLOW+":
+            continue
+        ttft = _mean_number(row.get("ttft_sec") for row in group_rows)
+        if ttft > 0:
+            aaflow_refs[workload] = ttft
+
+    table_rows = []
+    for (baseline, workload), group_rows in sorted(groups.items()):
+        ttft = _mean_number(row.get("ttft_sec") for row in group_rows)
+        ref = aaflow_refs.get(workload, 0.0)
+        speedup = ttft / ref if ref > 0 and ttft > 0 else 0.0
+        table_rows.append(
+            [
+                baseline,
+                workload,
+                str(len(group_rows)),
+                _fmt_float(ttft),
+                f"{speedup:.2f}x" if speedup else "",
+                _fmt_float(_mean_number(row.get("total_latency_sec") for row in group_rows)),
+                _fmt_float(_mean_number(row.get("throughput_tokens_per_sec") for row in group_rows)),
+                _fmt_float(_mean_number(row.get("kv_peak_bytes") for row in group_rows) / (1024 * 1024)),
+                _fmt_float(_mean_number(row.get("kv_reuse_ratio") for row in group_rows)),
+            ]
+        )
+    return table_rows
+
+
+def _mean_number(values: Iterable[Any]) -> float:
+    parsed = [_number(value) for value in values if value not in {None, ""}]
+    return sum(parsed) / len(parsed) if parsed else 0.0
+
+
+def _file_inventory_line(path: Path, label: str) -> str:
+    if path.is_dir():
+        count = sum(1 for _ in path.rglob("*"))
+        return f"{label}: directory ({count} entries)"
+    if path.exists():
+        return f"{label}: file ({path.stat().st_size} bytes)"
+    return f"{label}: missing"
+
+
+def _format_table(headers: list[str], rows: list[list[str]]) -> list[str]:
+    if not rows:
+        return ["No rows."]
+    widths = [max(len(headers[idx]), *(len(row[idx]) for row in rows)) for idx in range(len(headers))]
+    lines = [
+        " | ".join(headers[idx].ljust(widths[idx]) for idx in range(len(headers))),
+        "-+-".join("-" * width for width in widths),
+    ]
+    lines.extend(" | ".join(row[idx].ljust(widths[idx]) for idx in range(len(headers))) for row in rows)
+    return lines
 
 
 def _number(value: Any, default: float = 0.0) -> float:

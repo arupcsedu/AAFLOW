@@ -8,8 +8,8 @@
 #SBATCH --gres=gpu:a100:1
 #SBATCH --mem=96G
 #SBATCH --time=04:00:00
-#SBATCH --output=/project/bi_dsc_community/drc_rag/stateful_agentic_algebra/slurm/slurm-%x-%j.out
-#SBATCH --error=/project/bi_dsc_community/drc_rag/stateful_agentic_algebra/slurm/slurm-%x-%j.err
+#SBATCH --output=slurm-%x-%j.out
+#SBATCH --error=slurm-%x-%j.err
 
 set -euo pipefail
 export SLURM_CPU_BIND=none
@@ -17,8 +17,16 @@ export SLURM_CPU_BIND=none
 # Override the generic GPU request at submit time for a specific accelerator:
 #   sbatch -p gpu --gres=gpu:a100:1 ...
 
-PROJECT_ROOT="${PROJECT_ROOT:-/project/bi_dsc_community/drc_rag}"
-PYTHON_BIN="${PYTHON_BIN:-/scratch/djy8hg/env/drc_rag_bench_env/bin/python}"
+SAA_ENV_FILE="${SAA_ENV_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/env.sh}"
+if [[ -f "$SAA_ENV_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$SAA_ENV_FILE"
+fi
+
+PROJECT_ROOT="${PROJECT_ROOT:-${PRJ_PATH:-/project/bi_dsc_community/drc_rag}}"
+ENV_PATH="${ENV_PATH:-/scratch/${USER}/env}"
+DATA_PATH="${DATA_PATH:-/scratch/${USER}/stateful_aaflow}"
+PYTHON_BIN="${PYTHON_BIN:-$ENV_PATH/drc_rag_bench_env/bin/python}"
 
 MODEL_ID="${MODEL_ID:-gpt2}"
 BACKEND="${BACKEND:-hf}"
@@ -30,7 +38,8 @@ NUM_PROMPTS="${NUM_PROMPTS:-2}"
 TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_ROOT/runs/stateful/real_llm_hf/${SLURM_JOB_ID:-manual}}"
 
-export HF_HOME="${HF_HOME:-/scratch/${USER}/hf_cache}"
+export HF_HOME="${HF_HOME:-$DATA_PATH/huggingface}"
+export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-$HF_HOME/hub}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/transformers}"
 export HUGGINGFACE_HUB_TOKEN="${HUGGINGFACE_HUB_TOKEN:-${HF_TOKEN:-}}"
 if [[ -n "$HUGGINGFACE_HUB_TOKEN" ]]; then
@@ -52,7 +61,7 @@ if [[ -n "$NVIDIA_LIB_PATHS" ]]; then
   export LD_LIBRARY_PATH="$NVIDIA_LIB_PATHS:${LD_LIBRARY_PATH:-}"
 fi
 
-mkdir -p "$OUTPUT_DIR/logs" "$HF_HOME" "$TRANSFORMERS_CACHE"
+mkdir -p "$OUTPUT_DIR/logs" "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE"
 
 cd "$PROJECT_ROOT"
 export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"

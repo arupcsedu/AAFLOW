@@ -8,8 +8,8 @@
 #SBATCH --gres=gpu:a100:1
 #SBATCH --mem=192G
 #SBATCH --time=12:00:00
-#SBATCH --output=/project/bi_dsc_community/drc_rag/stateful_agentic_algebra/slurm/slurm-%x-%j.out
-#SBATCH --error=/project/bi_dsc_community/drc_rag/stateful_agentic_algebra/slurm/slurm-%x-%j.err
+#SBATCH --output=slurm-%x-%j.out
+#SBATCH --error=slurm-%x-%j.err
 
 set -euo pipefail
 export SLURM_CPU_BIND=none
@@ -18,9 +18,17 @@ export SLURM_CPU_BIND=none
 # On this cluster, A100 nodes are available through the gpu partition:
 #   sbatch -p gpu --gres=gpu:a100:1 ...
 
-PROJECT_ROOT="${PROJECT_ROOT:-/project/bi_dsc_community/drc_rag}"
-PYTHON_BIN="${PYTHON_BIN:-/scratch/djy8hg/env/saa_vllm_env/bin/python}"
-SGLANG_PYTHON_BIN="${SGLANG_PYTHON_BIN:-/scratch/djy8hg/env/drc_rag_bench_env/bin/python}"
+SAA_ENV_FILE="${SAA_ENV_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/env.sh}"
+if [[ -f "$SAA_ENV_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$SAA_ENV_FILE"
+fi
+
+PROJECT_ROOT="${PROJECT_ROOT:-${PRJ_PATH:-/project/bi_dsc_community/drc_rag}}"
+ENV_PATH="${ENV_PATH:-/scratch/${USER}/env}"
+DATA_PATH="${DATA_PATH:-/scratch/${USER}/stateful_aaflow}"
+PYTHON_BIN="${PYTHON_BIN:-$ENV_PATH/saa_vllm_env/bin/python}"
+SGLANG_PYTHON_BIN="${SGLANG_PYTHON_BIN:-$ENV_PATH/drc_rag_bench_env/bin/python}"
 
 MODEL_ID="${MODEL_ID:-gpt2,mistralai/Mistral-7B-Instruct-v0.3,meta-llama/Meta-Llama-3-8B-Instruct}"
 BACKEND="${BACKEND:-hf,vllm,sglang}"
@@ -30,11 +38,18 @@ AGENT_GRID="${AGENT_GRID:-2,4,8}"
 BRANCH_GRID="${BRANCH_GRID:-2,4}"
 NUM_PROMPTS="${NUM_PROMPTS:-16}"
 TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-2}"
-VLLM_PORT="${VLLM_PORT:-8000}"
-SGLANG_PORT="${SGLANG_PORT:-30000}"
+if [[ "${SLURM_JOB_ID:-}" =~ ^[0-9]+$ ]]; then
+  JOB_PORT_OFFSET=$((SLURM_JOB_ID % 20000))
+else
+  JOB_PORT_OFFSET=0
+fi
+VLLM_PORT="${VLLM_PORT:-$((20000 + JOB_PORT_OFFSET))}"
+SGLANG_PORT="${SGLANG_PORT:-$((30000 + JOB_PORT_OFFSET))}"
 VLLM_SERVER_TIMEOUT_SEC="${VLLM_SERVER_TIMEOUT_SEC:-900}"
 SGLANG_SERVER_TIMEOUT_SEC="${SGLANG_SERVER_TIMEOUT_SEC:-900}"
-SGLANG_SERVER_EXTRA_ARGS="${SGLANG_SERVER_EXTRA_ARGS:---disable-overlap-schedule --disable-cuda-graph}"
+SGLANG_SERVER_EXTRA_ARGS="${SGLANG_SERVER_EXTRA_ARGS:---disable-overlap-schedule --disable-cuda-graph --skip-server-warmup}"
+SGLANG_CONTEXT_LENGTH="${SGLANG_CONTEXT_LENGTH:-}"
+SGLANG_MAX_PREFILL_TOKENS="${SGLANG_MAX_PREFILL_TOKENS:-}"
 SGLANG_GCC_MODULE="${SGLANG_GCC_MODULE:-gcc/12.4.0}"
 CUDA_MODULE="${CUDA_MODULE:-cuda/12.8.0}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_ROOT/runs/stateful/real_llm_sweep/${SLURM_JOB_ID:-manual}}"
@@ -42,12 +57,29 @@ PLOT_PYTHON_BIN="${PLOT_PYTHON_BIN:-$SGLANG_PYTHON_BIN}"
 GENERATE_PLOTS="${GENERATE_PLOTS:-1}"
 CONFIG_PATH="${CONFIG_PATH:-}"
 
-export HF_HOME="${HF_HOME:-/scratch/${USER}/hf_cache}"
+# Load a locally stored Hugging Face token when the submit environment did not
+# already provide one. The file may contain shell exports such as
+# `export HF_TOKEN=...`; the token value itself is never printed below.
+if [[ -z "${HUGGINGFACE_HUB_TOKEN:-}" && -z "${HF_TOKEN:-}" && -f "$HOME/.hf_token" ]]; then
+  # shellcheck disable=SC1090
+  source "$HOME/.hf_token"
+fi
+
+export HF_HOME="${HF_HOME:-$DATA_PATH/huggingface}"
+export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-$HF_HOME/hub}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/transformers}"
 export HUGGINGFACE_HUB_TOKEN="${HUGGINGFACE_HUB_TOKEN:-${HF_TOKEN:-}}"
 if [[ -n "$HUGGINGFACE_HUB_TOKEN" ]]; then
   export HF_TOKEN="$HUGGINGFACE_HUB_TOKEN"
 fi
+
+if [[ -n "$SGLANG_CONTEXT_LENGTH" ]]; then
+  SGLANG_SERVER_EXTRA_ARGS="$SGLANG_SERVER_EXTRA_ARGS --context-length $SGLANG_CONTEXT_LENGTH"
+fi
+if [[ -n "$SGLANG_MAX_PREFILL_TOKENS" ]]; then
+  SGLANG_SERVER_EXTRA_ARGS="$SGLANG_SERVER_EXTRA_ARGS --max-prefill-tokens $SGLANG_MAX_PREFILL_TOKENS"
+fi
+
 export PYTHONNOUSERSITE="${PYTHONNOUSERSITE:-1}"
 if ! command -v module >/dev/null 2>&1 && [[ -f /etc/profile.d/modules.sh ]]; then
   # shellcheck disable=SC1091
@@ -74,7 +106,7 @@ if [[ -n "$NVIDIA_LIB_PATHS" ]]; then
   export LD_LIBRARY_PATH="$NVIDIA_LIB_PATHS:${LD_LIBRARY_PATH:-}"
 fi
 
-mkdir -p "$OUTPUT_DIR/logs" "$HF_HOME" "$TRANSFORMERS_CACHE"
+mkdir -p "$OUTPUT_DIR/logs" "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE"
 
 cd "$PROJECT_ROOT"
 export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
@@ -173,4 +205,5 @@ echo "Done. Results:"
 echo "  $OUTPUT_DIR/results_raw.jsonl"
 echo "  $OUTPUT_DIR/results.csv"
 echo "  $OUTPUT_DIR/summary_by_model.csv"
+echo "  $OUTPUT_DIR/summary.out"
 echo "  $OUTPUT_DIR/figures"

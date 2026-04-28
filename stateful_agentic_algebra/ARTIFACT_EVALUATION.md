@@ -27,16 +27,18 @@ Python environments below. The split is intentional: the vLLM stack and the
 SGLang stack have conflicting CUDA/PyTorch dependency constraints.
 
 ```bash
-export PROJECT_ROOT=/project/bi_dsc_community/drc_rag
-cd "$PROJECT_ROOT"
+# Either edit stateful_agentic_algebra/env.sh, or override before sourcing it.
+export PRJ_PATH=/path/to/AAFLOW
+export ENV_PATH=/scratch/$USER/env
+export DATA_PATH=/scratch/$USER/stateful_aaflow
+source stateful_agentic_algebra/env.sh
 
-# Main runner, HF backend, and vLLM backend.
-export PYTHON_BIN=/scratch/djy8hg/env/saa_vllm_env/bin/python
+cd "$PRJ_PATH"
 
-# SGLang serving backend.
-export SGLANG_PYTHON_BIN=/scratch/djy8hg/env/drc_rag_bench_env/bin/python
-
-export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
+# Derived by env.sh unless explicitly overridden.
+export PYTHONPATH="$PRJ_PATH:${PYTHONPATH:-}"
+export PYTHON_BIN="$ENV_PATH/saa_vllm_env/bin/python"
+export SGLANG_PYTHON_BIN="$ENV_PATH/drc_rag_bench_env/bin/python"
 ```
 
 Validate the environments before launching a long Slurm job:
@@ -52,9 +54,9 @@ If these variables are not set, model weights usually download under
 `~/.cache/huggingface/hub/`, which may fill home storage.
 
 ```bash
-export HF_HOME=/scratch/$USER/hf_cache
-export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
-export TRANSFORMERS_CACHE=$HF_HOME/transformers
+export HF_HOME="$DATA_PATH/huggingface"
+export HUGGINGFACE_HUB_CACHE="$HF_HOME/hub"
+export TRANSFORMERS_CACHE="$HF_HOME/transformers"
 mkdir -p "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE"
 ```
 
@@ -73,7 +75,7 @@ starting the server. Without GCC 12, SGLang JIT compilation can fail with
 module load gcc/12.4.0 cuda/12.8.0
 export CC=$(command -v gcc)
 export CXX=$(command -v g++)
-export SGLANG_SERVER_EXTRA_ARGS='--disable-overlap-schedule --disable-cuda-graph'
+export SGLANG_SERVER_EXTRA_ARGS='--disable-overlap-schedule --disable-cuda-graph --skip-server-warmup'
 ```
 
 ## Smoke Test
@@ -214,9 +216,7 @@ For a small real-framework validation with non-skipped rows, use a small model
 and short context first:
 
 ```bash
-export PROJECT_ROOT=/project/bi_dsc_community/drc_rag
-export PYTHON_BIN=/scratch/djy8hg/env/saa_vllm_env/bin/python
-export SGLANG_PYTHON_BIN=/scratch/djy8hg/env/drc_rag_bench_env/bin/python
+export PROJECT_ROOT="$PRJ_PATH"
 export MODEL_ID='gpt2,distilgpt2'
 export BACKEND='hf,vllm,sglang'
 export CONTEXT_GRID='16'
@@ -249,7 +249,7 @@ If these variables are not set, model weights usually download under
 `~/.cache/huggingface/hub/`, which may fill home storage.
 
 ```bash
-export HF_HOME=/scratch/$USER/hf_cache
+export HF_HOME=$DATA_PATH/huggingface
 export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
 export TRANSFORMERS_CACHE=$HF_HOME/transformers
 mkdir -p "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE"
@@ -300,8 +300,8 @@ The multi-model runner launches SGLang through `SGLANG_PYTHON_BIN`. On this
 cluster, use the SGLang env and server flags from the installation section:
 
 ```bash
-export SGLANG_PYTHON_BIN=/scratch/djy8hg/env/drc_rag_bench_env/bin/python
-export SGLANG_SERVER_EXTRA_ARGS='--disable-overlap-schedule --disable-cuda-graph'
+source stateful_agentic_algebra/env.sh
+export SGLANG_SERVER_EXTRA_ARGS='--disable-overlap-schedule --disable-cuda-graph --skip-server-warmup'
 ```
 
 If SGLang's packaged `bench_serving` command fails because optional benchmark

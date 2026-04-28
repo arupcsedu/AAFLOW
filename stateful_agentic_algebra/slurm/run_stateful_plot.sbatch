@@ -7,14 +7,19 @@
 #SBATCH --partition=parallel
 #SBATCH --mem=8G
 #SBATCH --time=00:20:00
-#SBATCH --output=/project/bi_dsc_community/drc_rag/stateful_agentic_algebra/slurm/slurm-%x-%j.out
-#SBATCH --error=/project/bi_dsc_community/drc_rag/stateful_agentic_algebra/slurm/slurm-%x-%j.err
+#SBATCH --output=slurm-%x-%j.out
+#SBATCH --error=slurm-%x-%j.err
 
 set -euo pipefail
 export SLURM_CPU_BIND=none
 
-PROJECT_ROOT="${PROJECT_ROOT:-/project/bi_dsc_community/drc_rag}"
+SAA_ENV_FILE="${SAA_ENV_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/env.sh}"
+if [[ -f "$SAA_ENV_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$SAA_ENV_FILE"
+fi
 
+PROJECT_ROOT="${PROJECT_ROOT:-${PRJ_PATH:-/project/bi_dsc_community/drc_rag}}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 BASELINE="${BASELINE:-AAFLOW+}"
 WORKLOAD="${WORKLOAD:-linear_handoff}"

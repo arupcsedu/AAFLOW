@@ -1,16 +1,14 @@
 models:
-  - mistralai/Mistral-7B-Instruct-v0.3
+  - meta-llama/Meta-Llama-3-8B-Instruct
 backends:
   - hf
 context_grid:
   - 1024
+  - 2048
   - 4096
-  - 8192
-  - 16384
-  - 24576
-  - 28672
-  - 30720
-  - 32640
+  - 6144
+  - 7168
+  - 8064
 output_grid:
   - 64
 agent_grid:
@@ -28,4 +26,4 @@ resume_overhead_sec: 0.0001
 omega_state_sec: 0.00005
 omega_text_sec: 0.00005
 hf_device: auto
-output_dir: runs/stateful/experiment1_ttft_stretch_mistral
+output_dir: runs/stateful/experiment1_ttft_llama3_hf

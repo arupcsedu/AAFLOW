@@ -41,10 +41,11 @@ from .hf_kv_backend import HFBackendConfig, HFKVBackend, HFMeasurement
 from .model_registry import get_model_spec
 from .sglang_benchmark import (
     check_sglang_available,
+    find_available_port,
     launch_sglang_server,
     run_sglang_bench_serve,
     terminate_process_tree as terminate_sglang_process_tree,
-    wait_for_server as wait_for_sglang_server,
+    wait_for_launched_server as wait_for_sglang_server,
 )
 from .vllm_benchmark import check_vllm_available, run_vllm_bench_serve, launch_vllm_server, wait_for_server
 
@@ -259,6 +260,7 @@ def run_matrix(config: MultiLLMConfig) -> list[dict[str, Any]]:
     _write_csv(output_dir / "results.csv", rows)
     _write_summary(output_dir / "summary_by_model.csv", rows)
     _write_benchmark_table(output_dir / "benchmark.out", rows)
+    _write_summary_out(output_dir / "summary.out", rows, config)
     return rows
 
 
@@ -653,24 +655,30 @@ def _run_sglang_combo(
     combo_dir.mkdir(parents=True, exist_ok=True)
     server = None
     try:
+        actual_port = find_available_port(config.sglang_port)
         server = launch_sglang_server(
             model_id=model_id,
             tensor_parallel_size=config.tensor_parallel_size,
-            port=config.sglang_port,
+            port=actual_port,
             extra_args=shlex.split(config.sglang_server_extra_args),
             stdout_path=combo_dir / "sglang_stdout.log",
             stderr_path=combo_dir / "sglang_stderr.log",
             python_bin=config.sglang_python_bin,
         )
-        if not wait_for_sglang_server(config.sglang_port, timeout_sec=config.sglang_server_timeout_sec):
-            raise RuntimeError(f"SGLang server did not become ready on port {config.sglang_port}")
+        if not wait_for_sglang_server(
+            actual_port,
+            server,
+            timeout_sec=config.sglang_server_timeout_sec,
+            stderr_path=combo_dir / "sglang_stderr.log",
+        ):
+            raise RuntimeError(f"SGLang server did not become ready on port {actual_port}")
         metrics = run_sglang_bench_serve(
             model_id=model_id,
             input_len=context_tokens,
             output_len=output_tokens,
             num_prompts=config.num_prompts,
             request_rate="inf",
-            port=config.sglang_port,
+            port=actual_port,
             output_dir=combo_dir,
             timeout_sec=config.sglang_bench_timeout_sec,
             python_bin=config.sglang_python_bin,
@@ -687,6 +695,8 @@ def _run_sglang_combo(
             e2el_sec=_float(metrics.get("e2el_sec")),
             request_throughput_req_per_sec=_float(metrics.get("request_throughput_req_per_sec")),
             source_metrics_path=str(combo_dir / "metrics.json"),
+            sglang_port=actual_port,
+            requested_sglang_port=config.sglang_port,
         )
         return row
     except Exception as exc:
@@ -822,6 +832,161 @@ def _write_benchmark_table(path: Path, rows: list[dict[str, Any]]) -> None:
     if not table_rows:
         lines.append("No benchmark rows were produced.")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_summary_out(path: Path, rows: list[dict[str, Any]], config: MultiLLMConfig) -> None:
+    """Write a human-readable run summary with file inventory and speedups."""
+
+    output_dir = path.parent
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    available_rows = [row for row in rows if row.get("available") is True and row.get("skipped") is not True]
+    skipped_rows = [row for row in rows if row.get("skipped") is True or row.get("available") is not True]
+    generated_at = time.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+    lines = [
+        "Stateful Agentic Algebra Run Summary",
+        "=" * 38,
+        f"Generated at: {generated_at}",
+        f"Output directory: {output_dir}",
+        f"Rows: {len(rows)}",
+        f"Available rows: {len(available_rows)}",
+        f"Skipped/unavailable rows: {len(skipped_rows)}",
+        "",
+        "Configuration",
+        "-" * 13,
+    ]
+    config_dict = config.to_json_dict()
+    for key in sorted(config_dict):
+        value = config_dict[key]
+        if key in {"models", "backends", "context_grid", "output_grid", "agent_grid", "branch_grid", "seeds"}:
+            lines.append(f"{key}: {value}")
+    for key in [
+        "num_prompts",
+        "tensor_parallel_size",
+        "bandwidth_bytes_per_sec",
+        "network_latency_sec",
+        "hf_device",
+        "hf_local_files_only",
+        "vllm_port",
+        "sglang_port",
+    ]:
+        if key in config_dict:
+            lines.append(f"{key}: {config_dict[key]}")
+
+    lines.extend(["", "Output Files", "-" * 12])
+    for rel in [
+        "config.json",
+        "results_raw.jsonl",
+        "results.csv",
+        "summary_by_model.csv",
+        "benchmark.out",
+        "figures",
+        "logs/sweep.out",
+        "logs/sweep.err",
+        "logs/nvidia_smi_start.log",
+        "logs/nvidia_smi_end.log",
+    ]:
+        lines.append(_file_inventory_line(output_dir / rel, rel))
+    lines.append("summary.out: file (this file)")
+
+    lines.extend(["", "Benchmark Summary", "-" * 17])
+    summary_rows = _summary_out_rows(rows)
+    lines.extend(_format_table(
+        [
+            "Model",
+            "Backend",
+            "Workload",
+            "Rows",
+            "Avail",
+            "Skip",
+            "TTFT(s)",
+            "AAFLOW+ faster",
+            "Total(s)",
+            "Tok/s",
+            "KV GiB",
+        ],
+        summary_rows,
+    ))
+
+    if skipped_rows:
+        lines.extend(["", "Skipped / Unavailable Rows", "-" * 26])
+        skipped_table = []
+        for row in skipped_rows[:50]:
+            skipped_table.append(
+                [
+                    _short_model(str(row.get("model_id", ""))),
+                    str(row.get("backend", "")),
+                    str(row.get("workload_name", "")),
+                    str(row.get("context_tokens", "")),
+                    str(row.get("output_tokens", "")),
+                    _short_reason(row.get("reason", "unavailable"), limit=72),
+                ]
+            )
+        lines.extend(_format_table(["Model", "Backend", "Workload", "Ctx", "Out", "Reason"], skipped_table))
+        if len(skipped_rows) > 50:
+            lines.append(f"... truncated {len(skipped_rows) - 50} additional skipped rows")
+
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _summary_out_rows(rows: list[dict[str, Any]]) -> list[list[str]]:
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        groups.setdefault((str(row.get("model_id", "")), str(row.get("backend", "")), str(row.get("workload_name", ""))), []).append(row)
+
+    aaflow_ttft_by_model: dict[str, float] = {}
+    for (model_id, _backend, workload_name), group_rows in groups.items():
+        if workload_name != "AAFLOW+":
+            continue
+        available = [row for row in group_rows if row.get("available") is True and row.get("skipped") is not True]
+        ttft = _mean(row.get("ttft_sec") for row in available)
+        if ttft > 0:
+            aaflow_ttft_by_model[model_id] = ttft
+
+    table_rows = []
+    for (model_id, backend, workload_name), group_rows in sorted(groups.items()):
+        available = [row for row in group_rows if row.get("available") is True and row.get("skipped") is not True]
+        mean_ttft = _mean(row.get("ttft_sec") for row in available)
+        ref_ttft = aaflow_ttft_by_model.get(model_id, 0.0)
+        speedup = mean_ttft / ref_ttft if ref_ttft > 0 and mean_ttft > 0 else 0.0
+        table_rows.append(
+            [
+                _short_model(model_id),
+                backend,
+                workload_name,
+                str(len(group_rows)),
+                str(len(available)),
+                str(sum(1 for row in group_rows if row.get("skipped") or row.get("available") is not True)),
+                _fmt_float(mean_ttft),
+                f"{speedup:.2f}x" if speedup else "",
+                _fmt_float(_mean(row.get("total_latency_sec") for row in available)),
+                _fmt_float(_mean(row.get("throughput_tokens_per_sec") for row in available)),
+                _fmt_float(_mean(row.get("kv_total_bytes") for row in available) / (1024**3)),
+            ]
+        )
+    return table_rows
+
+
+def _file_inventory_line(path: Path, label: str) -> str:
+    if path.is_dir():
+        count = sum(1 for _ in path.rglob("*"))
+        return f"{label}: directory ({count} entries)"
+    if path.exists():
+        return f"{label}: file ({path.stat().st_size} bytes)"
+    return f"{label}: missing"
+
+
+def _format_table(headers: list[str], rows: list[list[str]]) -> list[str]:
+    if not rows:
+        return ["No rows."]
+    widths = [max(len(headers[idx]), *(len(row[idx]) for row in rows)) for idx in range(len(headers))]
+    lines = [
+        " | ".join(headers[idx].ljust(widths[idx]) for idx in range(len(headers))),
+        "-+-".join("-" * width for width in widths),
+    ]
+    lines.extend(" | ".join(row[idx].ljust(widths[idx]) for idx in range(len(headers))) for row in rows)
+    return lines
 
 
 def _short_model(model_id: str) -> str:

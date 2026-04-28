@@ -42,6 +42,20 @@ module adds a separate state-aware layer on top:
 
 ## Quick Start
 
+Set local paths in one place:
+
+```bash
+# Either edit stateful_agentic_algebra/env.sh, or override before sourcing it.
+export PRJ_PATH=/path/to/AAFLOW
+export ENV_PATH=/path/to/python/envs
+export DATA_PATH=/path/to/scratch_or_data
+source stateful_agentic_algebra/env.sh
+```
+
+`env.sh` derives `PROJECT_ROOT`, `PYTHON_BIN`, `SGLANG_PYTHON_BIN`,
+`HF_HOME`, `HUGGINGFACE_HUB_CACHE`, and `TRANSFORMERS_CACHE` from those three
+variables. Slurm scripts source this file automatically when it is present.
+
 From the repository root:
 
 ```bash
@@ -69,12 +83,24 @@ without downloading models or requiring GPUs. It uses deterministic synthetic
 token counts, simulated KV bytes, and the same metric schema used by real-model
 runs.
 
-Use the project benchmark environment:
+Create a light CPU/mock environment when you only need tests, mock sweeps, and
+basic CSV/JSON output:
 
 ```bash
-cd /project/bi_dsc_community/drc_rag
-export PYTHON_BIN=/scratch/djy8hg/env/saa_vllm_env/bin/python
+cd $PRJ_PATH
+python3 -m venv $ENV_PATH/saa_mock_env
+source $ENV_PATH/saa_mock_env/bin/activate
+python -m pip install -U pip setuptools wheel
+python -m pip install pytest pyyaml matplotlib
 export PYTHONPATH="$PWD:${PYTHONPATH:-}"
+```
+
+Or use the validated project benchmark environment from the central path file:
+
+```bash
+source stateful_agentic_algebra/env.sh
+cd "$PRJ_PATH"
+export PYTHONPATH="$PRJ_PATH:${PYTHONPATH:-}"
 ```
 
 On this cluster, CUDA Python wheels may need their packaged NVIDIA libraries in
@@ -168,23 +194,185 @@ The config files define:
 
 ## Real LLM Runs
 
-The current real-LLM benchmark environment is:
+The current main real-LLM/vLLM benchmark environment is derived from:
 
 ```bash
-export PYTHON_BIN=/scratch/djy8hg/env/saa_vllm_env/bin/python
+source stateful_agentic_algebra/env.sh
+echo "$PYTHON_BIN"
 ```
 
-`/scratch/djy8hg/env/saa_vllm_env/bin/python` is the Python used by the Slurm
-scripts. It currently points to the benchmark environment under
-`/scratch/djy8hg/env/drc_rag_bench_env`, so use `PYTHON_BIN` rather than plain
-`python` in shell commands and batch scripts.
+`PYTHON_BIN` is the Python used by the Slurm
+scripts for Hugging Face and vLLM runs. Use `PYTHON_BIN` rather than plain
+`python` in shell commands and batch scripts so the same pinned packages are
+used everywhere.
+
+### Recreate The `saa_vllm_env` Environment
+
+The package set from `$PYTHON_BIN` was exported
+to:
+
+```text
+stateful_agentic_algebra/requirements.txt
+```
+
+That file is a full `pip freeze --all` snapshot of the working vLLM/HF
+environment. It includes large CUDA 12 wheels, `torch==2.9.0`,
+`transformers==4.57.6`, and `vllm==0.11.2`. It was captured from Python
+`3.11.14` on Linux. Recreate it on a machine with enough scratch space and a
+compatible NVIDIA driver:
+
+```bash
+cd $PRJ_PATH
+
+python3 -m venv $ENV_PATH/saa_vllm_env
+source $ENV_PATH/saa_vllm_env/bin/activate
+
+python -m pip install -U pip setuptools wheel
+python -m pip install -r stateful_agentic_algebra/requirements.txt
+```
+
+If you want to reproduce the exact absolute path used by the existing Slurm
+scripts on this account:
+
+```bash
+python3 -m venv $SAA_VLLM_ENV
+source $SAA_VLLM_ENV/bin/activate
+python -m pip install -U pip setuptools wheel
+python -m pip install -r stateful_agentic_algebra/requirements.txt
+```
+
+The full requirements file is intentionally heavy. For mock-only work, use the
+light mock environment above instead of installing CUDA/vLLM packages.
+
+Validate the recreated environment:
+
+```bash
+$ENV_PATH/saa_vllm_env/bin/python - <<'PY'
+import torch
+import transformers
+import vllm
+
+print("torch", torch.__version__)
+print("transformers", transformers.__version__)
+print("vllm", vllm.__version__)
+print("cuda_available", torch.cuda.is_available())
+print("cuda_device_count", torch.cuda.device_count())
+PY
+```
+
+The current `saa_vllm_env` does not include every convenience package used by
+the plotting tests, such as `matplotlib`. Install it into this environment when
+you want one interpreter for both benchmarking and plotting:
+
+```bash
+$PYTHON_BIN -m pip install matplotlib
+```
+
+SGLang is kept in a separate environment in this repository because SGLang and
+vLLM often require different pinned CUDA/PyTorch packages. `env.sh` derives
+`SGLANG_PYTHON_BIN` from `ENV_PATH` unless you override it.
+
+### Recreate The SGLang Environment
+
+The SGLang serving environment used by the Slurm scripts is `SGLANG_PYTHON_BIN`,
+derived from `ENV_PATH` in `stateful_agentic_algebra/env.sh`.
+
+Its package set was exported to:
+
+```text
+stateful_agentic_algebra/slang_requirements.txt
+```
+
+The file is a full `pip freeze --all` snapshot of the working SGLang
+environment. It includes `sglang==0.5.10.post1`,
+`sglang-kernel==0.4.1`, `torch==2.9.1`, `transformers==5.3.0`,
+`matplotlib==3.10.8`, CUDA 12 wheels, and other benchmark dependencies. The
+current environment also contains `vllm==0.11.2`; for clean third-party
+reproduction, use this file for SGLang runs and keep the main vLLM/HF
+environment separate.
+
+Create a new SGLang environment:
+
+```bash
+cd $PRJ_PATH
+
+python3 -m venv $ENV_PATH/saa_sglang_env
+source $ENV_PATH/saa_sglang_env/bin/activate
+
+python -m pip install -U pip setuptools wheel
+python -m pip install -r stateful_agentic_algebra/slang_requirements.txt
+```
+
+If you want to reproduce the absolute path used by the existing Slurm scripts
+on this account:
+
+```bash
+python3 -m venv $SAA_BENCH_ENV
+source $SAA_BENCH_ENV/bin/activate
+python -m pip install -U pip setuptools wheel
+python -m pip install -r stateful_agentic_algebra/slang_requirements.txt
+```
+
+SGLang JIT compilation needs a modern host compiler on this cluster. Load these
+modules before launching SGLang servers:
+
+```bash
+module load gcc/12.4.0 cuda/12.8.0
+export CC=$(command -v gcc)
+export CXX=$(command -v g++)
+export SGLANG_SERVER_EXTRA_ARGS='--disable-overlap-schedule --disable-cuda-graph --skip-server-warmup'
+```
+
+Set the same scratch cache variables used by HF/vLLM so model downloads do not
+fill home storage:
+
+```bash
+export HF_HOME=$DATA_PATH/huggingface
+export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
+export TRANSFORMERS_CACHE=$HF_HOME/transformers
+mkdir -p "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE"
+```
+
+Validate the recreated SGLang environment:
+
+```bash
+$ENV_PATH/saa_sglang_env/bin/python - <<'PY'
+import torch
+import transformers
+import sglang
+import matplotlib
+
+print("torch", torch.__version__)
+print("transformers", transformers.__version__)
+print("sglang", sglang.__version__)
+print("matplotlib", matplotlib.__version__)
+print("cuda_available", torch.cuda.is_available())
+print("cuda_device_count", torch.cuda.device_count())
+PY
+```
+
+Use the recreated environment with the benchmark runner:
+
+```bash
+export SGLANG_PYTHON_BIN=$ENV_PATH/saa_sglang_env/bin/python
+
+$PYTHON_BIN -m stateful_agentic_algebra.sglang_benchmark \
+  --model-id gpt2 \
+  --input-len 512 \
+  --output-len 32 \
+  --num-prompts 8 \
+  --tensor-parallel-size 1 \
+  --python-bin "$SGLANG_PYTHON_BIN" \
+  --output-dir runs/stateful/sglang_gpt2 \
+  --extra-args --disable-overlap-schedule --disable-cuda-graph
+```
 
 Recommended shell setup:
 
 ```bash
-cd /project/bi_dsc_community/drc_rag
-export PYTHON_BIN=/scratch/djy8hg/env/saa_vllm_env/bin/python
-export PYTHONPATH="$PWD:${PYTHONPATH:-}"
+source stateful_agentic_algebra/env.sh
+cd "$PRJ_PATH"
+export PYTHONPATH="$PRJ_PATH:${PYTHONPATH:-}"
 export PYTHONNOUSERSITE=1
 ```
 
@@ -218,20 +406,20 @@ for name in ["torch", "transformers", "vllm", "sglang"]:
 PY
 ```
 
-Install or refresh the environment only from a GPU/login shell where large wheel
-downloads are acceptable:
+Refresh the vLLM/HF environment from the pinned requirements only from a
+GPU/login shell where large wheel downloads are acceptable:
 
 ```bash
-$PYTHON_BIN -m pip install -U pip
-$PYTHON_BIN -m pip install pytest
-$PYTHON_BIN -m pip install vllm
-$PYTHON_BIN -m pip install sglang
+$PYTHON_BIN -m pip install -U pip setuptools wheel
+$PYTHON_BIN -m pip install -r stateful_agentic_algebra/requirements.txt
 ```
 
-SGLang and vLLM can require different pinned versions of `torch`,
-`transformers`, FlashInfer, and related CUDA packages. For production real-LLM
-serving sweeps, separate vLLM-only and SGLang-only environments are cleaner.
-The mock experiments do not depend on either package importing successfully.
+Do not install SGLang into this vLLM environment unless you intentionally want
+to resolve a combined stack yourself. SGLang and vLLM can require different
+pinned versions of `torch`, `transformers`, FlashInfer, and related CUDA
+packages. For production real-LLM serving sweeps, separate vLLM-only and
+SGLang-only environments are cleaner. The mock experiments do not depend on
+either package importing successfully.
 
 Hugging Face KV microbenchmark:
 
@@ -260,7 +448,7 @@ $PYTHON_BIN -m stateful_agentic_algebra.vllm_benchmark \
 SGLang serving benchmark:
 
 ```bash
-export SGLANG_PYTHON_BIN=/scratch/djy8hg/env/drc_rag_bench_env/bin/python
+source stateful_agentic_algebra/env.sh
 $PYTHON_BIN -m stateful_agentic_algebra.sglang_benchmark \
   --model-id gpt2 \
   --input-len 512 \
@@ -272,8 +460,8 @@ $PYTHON_BIN -m stateful_agentic_algebra.sglang_benchmark \
 ```
 
 SGLang and vLLM often need different pinned Python packages. Keep using
-`PYTHON_BIN=/scratch/djy8hg/env/saa_vllm_env/bin/python` for the main runner and
-set `SGLANG_PYTHON_BIN` when SGLang is installed in a separate environment.
+`PYTHON_BIN` for the main runner and set `SGLANG_PYTHON_BIN` when SGLang is
+installed in a separate environment.
 
 Multi-model sweep:
 
@@ -300,7 +488,6 @@ For comma-separated grids, always export variables first so Slurm does not split
 ```bash
 export MODEL_ID='gpt2,mistralai/Mistral-7B-Instruct-v0.3'
 export BACKEND='hf,vllm,sglang'
-export SGLANG_PYTHON_BIN=/scratch/djy8hg/env/drc_rag_bench_env/bin/python
 export CONTEXT_GRID='512,960'
 export OUTPUT_GRID='64'
 export NUM_PROMPTS='8'
@@ -325,9 +512,9 @@ filesystem instead of the default home-directory cache. Set these variables in
 the same shell before running HF or vLLM benchmarks:
 
 ```bash
-export HF_HOME=/scratch/$USER/huggingface
-export HUGGINGFACE_HUB_CACHE=/scratch/$USER/huggingface/hub
-export TRANSFORMERS_CACHE=/scratch/$USER/huggingface/transformers
+export HF_HOME=$DATA_PATH/huggingface
+export HUGGINGFACE_HUB_CACHE=$DATA_PATH/huggingface/hub
+export TRANSFORMERS_CACHE=$DATA_PATH/huggingface/transformers
 mkdir -p "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE"
 ```
 
