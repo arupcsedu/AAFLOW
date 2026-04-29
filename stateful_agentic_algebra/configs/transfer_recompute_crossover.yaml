@@ -1,6 +1,7 @@
 baselines:
   - AAFLOW+
   - dense_prefill
+  - kvcomm_prefix
   - distserve_style
 workloads:
   - transfer_recompute_crossover

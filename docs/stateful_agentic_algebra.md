@@ -146,6 +146,7 @@ Real LLM figures include:
 | `aaflow_text` | Optional AAFLOW text-passing adapter using AAFLOW agents/metrics when importable. |
 | `vllm_local_prefix` | Optional local-prefix reuse baseline through vLLM; skipped when vLLM is missing. |
 | `sglang_prefix` | Optional SGLang prefix baseline; skipped when SGLang is missing. |
+| `kvcomm_prefix` | KVCOMM-style anchor-based cross-context KV reuse baseline. Uses measured-profile simulation unless `KVCOMM_REPO` points to a FastMAS/KVCOMM checkout. |
 | `distserve_style` | Simulation of disaggregated prefill/decode. It is not claimed to be exact DistServe. |
 
 List baseline availability:
@@ -214,6 +215,8 @@ Plot outputs:
 
 - vLLM missing: vLLM paths are skipped unless `--require-vllm` is passed.
 - SGLang missing: `sglang_prefix` is skipped.
+- KVCOMM checkout missing: `kvcomm_prefix` still runs as a measured-profile
+  baseline; set `KVCOMM_REPO=/path/to/KVCOMM` to record external availability.
 - Hugging Face packages missing: mock mode works; install `torch` and
   `transformers` for real HF KV measurement.
 - Gated models: request access on Hugging Face and export

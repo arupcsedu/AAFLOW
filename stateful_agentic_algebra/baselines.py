@@ -26,6 +26,13 @@ from typing import Any, Dict, Iterable, List, Optional
 from .runtime import RuntimeMetrics
 from .scheduler import CostModel, StateAwareScheduler
 from .state_objects import OperatorSpec, OperatorType
+from .kvcomm_baseline import (
+    KVCOMM_BASELINE_LABEL,
+    KVCOMM_BASELINE_NAME,
+    kvcomm_available,
+    kvcomm_profile,
+    kvcomm_unavailable_reason,
+)
 from .vllm_backend import VLLMBackend
 from .workloads import QueryWorkload, WorkloadConfig, synthetic_branching_workload
 
@@ -373,6 +380,73 @@ class SGLangPrefixBaseline(BaselineAdapter):
         )
 
 
+class KVCOMMPrefixBaseline(BaselineAdapter):
+    """KVCOMM-style anchor reuse baseline with optional external availability.
+
+    This does not vendor or import FastMAS/KVCOMM eagerly. It exposes KVCOMM in
+    the same metric schema as the other baselines, using the anchor-reuse cost
+    model from `kvcomm_baseline.py` when a real KVCOMM checkout is unavailable.
+    """
+
+    name = KVCOMM_BASELINE_NAME
+    label = KVCOMM_BASELINE_LABEL
+
+    def available(self) -> bool:
+        return kvcomm_available()
+
+    def unavailable_reason(self) -> str:
+        return kvcomm_unavailable_reason()
+
+    def run_workload(self, workload_config: WorkloadConfig | QueryWorkload | dict[str, Any] | None) -> BaselineResult:
+        cfg = self._normalize(workload_config)
+        scheduler = StateAwareScheduler(cfg.cost_model)
+        branch_instances = max(1, cfg.num_agents * cfg.branch_factor)
+        prefill = scheduler.estimate_prefill(cfg.context_tokens)
+        decode = scheduler.estimate_decode(cfg.output_tokens)
+        first_token = cfg.cost_model.decode_time_per_token_sec if cfg.output_tokens else 0.0
+        kv_bytes = cfg.context_tokens * cfg.bytes_per_token
+        output_total = branch_instances * cfg.output_tokens
+        dense_prefill = branch_instances * prefill
+        profile = kvcomm_profile(
+            prefill_sec=prefill,
+            decode_sec=decode,
+            first_token_decode_sec=first_token,
+            kv_bytes=kv_bytes,
+            output_total=output_total,
+            branch_instances=branch_instances,
+            num_agents=cfg.num_agents,
+            branch_factor=cfg.branch_factor,
+            num_prompts=1,
+            dense_prefill_sec=dense_prefill,
+            omega_state_sec=cfg.cost_model.omega_state_sec,
+            omega_text_sec=cfg.cost_model.omega_text_sec,
+        )
+        metrics = self._metrics(
+            cfg,
+            prefill_sec=profile.prefill_sec,
+            decode_sec=profile.decode_sec,
+            omega_sec=profile.omega_sec,
+            kv_bytes=profile.kv_peak_bytes,
+            reuse_ratio=profile.kv_reuse_ratio,
+            ttft_sec=profile.ttft_sec,
+            observed_total_sec=profile.total_latency_sec,
+        )
+        metrics["kv_peak_bytes"] = profile.kv_peak_bytes
+        metrics["kv_transferred_bytes"] = profile.kv_transferred_bytes
+        metrics["anchor_overhead_sec"] = profile.anchor_overhead_sec
+        return BaselineResult(
+            self.label,
+            metrics,
+            available=self.available(),
+            reason="" if self.available() else self.unavailable_reason(),
+            metadata={
+                "mode": "kvcomm_external_available" if self.available() else "kvcomm_measured_profile_simulation",
+                "reuse_fraction": profile.reuse_fraction,
+                "anchor_overhead_sec": profile.anchor_overhead_sec,
+            },
+        )
+
+
 class DistServeStyleBaseline(BaselineAdapter):
     """DistServe-style simulated disaggregated prefill/decode baseline."""
 
@@ -418,6 +492,7 @@ def get_baselines() -> list[BaselineAdapter]:
         AAFLOWTextBaseline(),
         VLLMLocalPrefixBaseline(),
         SGLangPrefixBaseline(),
+        KVCOMMPrefixBaseline(),
         DistServeStyleBaseline(),
     ]
 

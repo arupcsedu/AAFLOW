@@ -9,7 +9,7 @@ Paper mapping:
     plot model-grouped TTFT, speedup, KV memory, vLLM serving, TPOT/ITL, and
     consistency metrics.
   - Each chart is a separate matplotlib figure and is saved as SVG, PNG, and
-    PDF for synthetic plots. Real LLM charts are saved as PNG and PDF.
+    PDF for both synthetic and real LLM plots.
 
 This module uses matplotlib only. It does not require seaborn or pandas.
 """
@@ -38,8 +38,13 @@ REAL_LLM_PLOT_SPECS = [
     ("real_ttft_vs_context_by_baseline", "TTFT vs Context Length by Baseline"),
     ("real_ttft_vs_context_by_model", "TTFT vs Context Length by Model"),
     ("real_ttft_speedup_over_dense", "TTFT Speedup over Dense Prefill"),
+    ("real_total_latency_vs_agents_by_baseline", "Total Latency vs Number of Agents by Baseline"),
+    ("real_speedup_vs_agents", "Speedup vs Number of Agents"),
     ("real_transfer_recompute_crossover", "Transfer/Recompute Crossover by Model and Bandwidth"),
     ("real_kv_memory_vs_context", "KV Memory Footprint vs Context Length"),
+    ("real_kv_memory_vs_branch", "KV Memory Footprint vs Branch Factor"),
+    ("real_throughput_by_baseline", "Throughput by Baseline"),
+    ("real_omega_by_baseline", "Framework Overhead Omega by Baseline"),
     ("real_vllm_throughput_vs_request_rate", "vLLM Throughput vs Request Rate"),
     ("real_tpot_vs_context", "TPOT vs Context Length"),
     ("real_itl_vs_context", "ITL vs Context Length"),
@@ -90,7 +95,11 @@ def generate_all_plots(results: str | Path | Sequence[dict[str, Any]], output_di
     return saved
 
 
-def generate_real_llm_plots(results: str | Path | Sequence[dict[str, Any]], output_dir: str | Path) -> list[Path]:
+def generate_real_llm_plots(
+    results: str | Path | Sequence[dict[str, Any]],
+    output_dir: str | Path,
+    plot_names: Sequence[str] | None = None,
+) -> list[Path]:
     """Generate real-model benchmark figures and return saved paths.
 
     The input may be a `multi_llm_runner.py` results CSV, a
@@ -109,14 +118,22 @@ def generate_real_llm_plots(results: str | Path | Sequence[dict[str, Any]], outp
         ("real_ttft_vs_context_by_baseline", _plot_real_ttft_vs_context_by_baseline),
         ("real_ttft_vs_context_by_model", _plot_real_ttft_vs_context_by_model),
         ("real_ttft_speedup_over_dense", _plot_real_ttft_speedup_over_dense),
+        ("real_total_latency_vs_agents_by_baseline", _plot_real_total_latency_vs_agents_by_baseline),
+        ("real_speedup_vs_agents", _plot_real_speedup_vs_agents),
         ("real_transfer_recompute_crossover", _plot_real_transfer_recompute_crossover),
         ("real_kv_memory_vs_context", _plot_real_kv_memory_vs_context),
+        ("real_kv_memory_vs_branch", _plot_real_kv_memory_vs_branch),
+        ("real_throughput_by_baseline", _plot_real_throughput_by_baseline),
+        ("real_omega_by_baseline", _plot_real_omega_by_baseline),
         ("real_vllm_throughput_vs_request_rate", _plot_real_vllm_throughput_vs_request_rate),
         ("real_tpot_vs_context", _plot_real_tpot_vs_context),
         ("real_itl_vs_context", _plot_real_itl_vs_context),
         ("real_consistency_exact_match_by_model", _plot_real_consistency_exact_match_by_model),
     ]
+    wanted = set(plot_names or [])
     for name, plotter in plotters:
+        if wanted and name not in wanted:
+            continue
         saved.extend(plotter(plt, rows, out / name))
     return saved
 
@@ -261,6 +278,23 @@ def _plot_real_ttft_speedup_over_dense(plt: Any, rows: list[dict[str, Any]], ste
     return _save_png_pdf(plt, fig, stem)
 
 
+def _plot_real_total_latency_vs_agents_by_baseline(plt: Any, rows: list[dict[str, Any]], stem: Path) -> list[Path]:
+    fig, ax = _figure(plt)
+    source = [row for row in _real_baseline_rows(rows) if _number(row.get("total_latency_sec")) is not None]
+    grouped = _group_xy(source, x_key="num_agents", y_key="total_latency_sec", series_key="baseline")
+    _plot_lines(ax, grouped)
+    _finish_real_xy(ax, grouped, "Number of Agents", "Total Latency (s)", "Total Latency vs Number of Agents")
+    return _save_png_pdf(plt, fig, stem)
+
+
+def _plot_real_speedup_vs_agents(plt: Any, rows: list[dict[str, Any]], stem: Path) -> list[Path]:
+    fig, ax = _figure(plt)
+    grouped = _real_speedup_by_x(rows, x_key="num_agents", metric_key="total_latency_sec")
+    _plot_lines(ax, grouped)
+    _finish_real_xy(ax, grouped, "Number of Agents", "Speedup (baseline / AAFLOW+)", "Speedup vs Number of Agents")
+    return _save_png_pdf(plt, fig, stem)
+
+
 def _plot_real_transfer_recompute_crossover(plt: Any, rows: list[dict[str, Any]], stem: Path) -> list[Path]:
     fig, ax = _figure(plt)
     if any(row.get("bandwidth_name") for row in rows):
@@ -293,7 +327,7 @@ def _plot_real_kv_memory_vs_context(plt: Any, rows: list[dict[str, Any]], stem: 
     fig, ax = _figure(plt)
     normalized = []
     for row in _real_baseline_rows(rows) or _real_primary_rows(rows) or rows:
-        memory = _first_number(row, ("kv_total_bytes", "kv_peak_bytes", "kv_bytes"))
+        memory = _effective_kv_memory_bytes(row)
         context = _number(row.get("context_tokens"))
         if memory is None or context is None:
             continue
@@ -303,6 +337,55 @@ def _plot_real_kv_memory_vs_context(plt: Any, rows: list[dict[str, Any]], stem: 
     grouped = _group_xy(normalized, x_key="context_tokens", y_key="_kv_memory_mib", series_key="baseline")
     _plot_lines(ax, grouped)
     _finish_real_xy(ax, grouped, "Context Length (tokens)", "KV Memory (MiB)", "KV Memory Footprint vs Context Length")
+    return _save_png_pdf(plt, fig, stem)
+
+
+def _plot_real_kv_memory_vs_branch(plt: Any, rows: list[dict[str, Any]], stem: Path) -> list[Path]:
+    fig, ax = _figure(plt)
+    normalized = []
+    for row in _real_baseline_rows(rows) or rows:
+        memory = _effective_kv_memory_bytes(row)
+        branch = _number(row.get("branch_factor"))
+        if memory is None or branch is None:
+            continue
+        copied = dict(row)
+        copied["_kv_memory_gib"] = memory / (1024**3)
+        normalized.append(copied)
+    grouped = _group_xy(normalized, x_key="branch_factor", y_key="_kv_memory_gib", series_key="baseline")
+    _plot_lines(ax, grouped)
+    _finish_real_xy(ax, grouped, "Branch Factor", "Peak KV Memory (GiB)", "KV Memory Footprint vs Branch Factor")
+    return _save_png_pdf(plt, fig, stem)
+
+
+def _plot_real_throughput_by_baseline(plt: Any, rows: list[dict[str, Any]], stem: Path) -> list[Path]:
+    fig, ax = _figure(plt)
+    grouped = _group_values(_real_baseline_rows(rows), group_key="baseline", value_key="throughput_tokens_per_sec")
+    labels, values = _bar_values(grouped)
+    if labels:
+        ax.bar(labels, values, color=_palette(len(labels)))
+    ax.set_ylabel("Throughput (tokens/s)")
+    ax.set_title("Throughput by Baseline")
+    _style_axis(ax)
+    if not labels:
+        _annotate_no_data(ax)
+    ax.tick_params(axis="x", rotation=25)
+    fig.tight_layout()
+    return _save_png_pdf(plt, fig, stem)
+
+
+def _plot_real_omega_by_baseline(plt: Any, rows: list[dict[str, Any]], stem: Path) -> list[Path]:
+    fig, ax = _figure(plt)
+    grouped = _group_values(_real_baseline_rows(rows), group_key="baseline", value_key="omega_sec")
+    labels, values = _bar_values(grouped)
+    if labels:
+        ax.bar(labels, values, color=_palette(len(labels)))
+    ax.set_ylabel("Framework Overhead Omega (s)")
+    ax.set_title("Framework Overhead Omega by Baseline")
+    _style_axis(ax)
+    if not labels:
+        _annotate_no_data(ax)
+    ax.tick_params(axis="x", rotation=25)
+    fig.tight_layout()
     return _save_png_pdf(plt, fig, stem)
 
 
@@ -625,6 +708,7 @@ BASELINE_WORKLOAD_NAMES = {
     "aaflow_text",
     "vllm_local_prefix",
     "sglang_prefix",
+    "kvcomm_prefix",
     "distserve_style",
 }
 
@@ -637,6 +721,32 @@ def _baseline_label(row: dict[str, Any]) -> str:
     if workload in BASELINE_WORKLOAD_NAMES:
         return workload
     return ""
+
+
+def _effective_kv_memory_bytes(row: dict[str, Any]) -> float | None:
+    """Estimate peak KV footprint consistently for plotted baseline rows.
+
+    Older result files stored the measured prefix KV size in `kv_peak_bytes` for
+    every baseline. For memory-efficiency figures we need the logical peak
+    footprint under each baseline's sharing model, so derive it from KV size,
+    agent count, and branch factor when a baseline label is present.
+    """
+
+    kv_bytes = _first_number(row, ("kv_total_bytes", "kv_peak_bytes", "kv_bytes"))
+    if kv_bytes is None or kv_bytes <= 0:
+        return None
+    agents = max(1, int(_number(row.get("num_agents")) or 1))
+    branch = max(1, int(_number(row.get("branch_factor")) or 1))
+    branch_instances = max(1, int(_number(row.get("branch_instances")) or (agents * branch)))
+    suffix_fraction = 0.15
+    baseline = _baseline_label(row)
+    if baseline == "AAFLOW+":
+        return kv_bytes * (1.0 + max(0, branch_instances - 1) * suffix_fraction)
+    if baseline in {"dense_prefill", "aaflow_text", "distserve_style"}:
+        return kv_bytes * branch_instances
+    if baseline in {"vllm_local_prefix", "sglang_prefix", "kvcomm_prefix"}:
+        return kv_bytes * agents * (1.0 + max(0, branch - 1) * suffix_fraction)
+    return kv_bytes
 
 
 def _series_label(row: dict[str, Any], series_key: str) -> str:
@@ -694,6 +804,61 @@ def _real_speedup_points(rows: list[dict[str, Any]]) -> dict[str, list[tuple[flo
     return dict(sorted(grouped.items(), key=lambda item: item[0]))
 
 
+def _real_speedup_by_x(rows: list[dict[str, Any]], *, x_key: str, metric_key: str) -> dict[str, list[tuple[float, float]]]:
+    refs: dict[tuple[str, str, float, float, float, float], float] = {}
+    candidates: list[dict[str, Any]] = []
+    for row in rows:
+        if not _row_usable(row):
+            continue
+        metric = _number(row.get(metric_key))
+        x_value = _number(row.get(x_key))
+        if metric is None or metric <= 0 or x_value is None:
+            continue
+        key = (
+            str(row.get("model_id") or "unknown"),
+            _backend_family(str(row.get("backend") or "")),
+            _number(row.get("context_tokens")) or 0.0,
+            _number(row.get("output_tokens")) or 0.0,
+            _number(row.get("branch_factor")) or 0.0,
+            x_value,
+        )
+        if _baseline_label(row) == "AAFLOW+":
+            refs[key] = metric
+        candidates.append(row)
+
+    grouped: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    for row in candidates:
+        x_value = _number(row.get(x_key))
+        metric = _number(row.get(metric_key))
+        if x_value is None or metric is None:
+            continue
+        key = (
+            str(row.get("model_id") or "unknown"),
+            _backend_family(str(row.get("backend") or "")),
+            _number(row.get("context_tokens")) or 0.0,
+            _number(row.get("output_tokens")) or 0.0,
+            _number(row.get("branch_factor")) or 0.0,
+            x_value,
+        )
+        ref = refs.get(key)
+        label = _baseline_label(row)
+        if ref is None or ref <= 0 or not label:
+            continue
+        grouped[label].append((x_value, metric / ref))
+    return dict(sorted(grouped.items(), key=lambda item: item[0]))
+
+
+def _backend_family(backend: str) -> str:
+    text = backend.lower()
+    if text.startswith("hf"):
+        return "hf"
+    if text.startswith("vllm"):
+        return "vllm"
+    if text.startswith("sglang"):
+        return "sglang"
+    return text
+
+
 def _consistency_value(row: dict[str, Any]) -> float | None:
     for key in ("exact_match_rate", "mean_exact_token_match_rate", "exact_token_match_rate", "output_agreement_rate"):
         value = _number(row.get(key))
@@ -730,7 +895,7 @@ def _save_all(plt: Any, fig: Any, stem: Path) -> list[Path]:
 def _save_png_pdf(plt: Any, fig: Any, stem: Path) -> list[Path]:
     stem.parent.mkdir(parents=True, exist_ok=True)
     saved = []
-    for suffix in ("png", "pdf"):
+    for suffix in ("png", "pdf", "svg"):
         path = stem.with_suffix(f".{suffix}")
         fig.savefig(path, bbox_inches="tight")
         saved.append(path)

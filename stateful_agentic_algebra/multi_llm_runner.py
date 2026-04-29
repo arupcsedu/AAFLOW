@@ -38,6 +38,7 @@ from typing import Any, Iterable, Optional
 
 from .config_utils import bool_default, config_value, csv_default, load_config_file
 from .hf_kv_backend import HFBackendConfig, HFKVBackend, HFMeasurement
+from .kvcomm_baseline import KVCOMM_BASELINE_NAME, kvcomm_metadata, kvcomm_profile
 from .model_registry import get_model_spec
 from .sglang_benchmark import (
     check_sglang_available,
@@ -48,6 +49,7 @@ from .sglang_benchmark import (
     wait_for_launched_server as wait_for_sglang_server,
 )
 from .vllm_benchmark import check_vllm_available, run_vllm_bench_serve, launch_vllm_server, wait_for_server
+from .transfer_crossover_real import model_metadata
 
 
 RESULT_FIELDS = [
@@ -86,6 +88,12 @@ RESULT_FIELDS = [
     "e2el_sec",
     "request_throughput_req_per_sec",
     "source_metrics_path",
+    "kvcomm_available",
+    "kvcomm_mode",
+    "kvcomm_repo",
+    "kvcomm_reference",
+    "kvcomm_anchor_overhead_sec",
+    "kvcomm_reuse_fraction",
 ]
 
 HF_MEASURED_BASELINES = (
@@ -94,6 +102,7 @@ HF_MEASURED_BASELINES = (
     "aaflow_text",
     "vllm_local_prefix",
     "sglang_prefix",
+    KVCOMM_BASELINE_NAME,
     "distserve_style",
 )
 
@@ -208,31 +217,27 @@ def run_matrix(config: MultiLLMConfig) -> list[dict[str, Any]]:
                     output_dir=output_dir,
                 )
             elif backend == "vllm":
-                combo_rows = [
-                    _run_vllm_combo(
-                        config=config,
-                        model_id=model_id,
-                        context_tokens=context_tokens,
-                        output_tokens=output_tokens,
-                        num_agents=num_agents,
-                        branch_factor=branch_factor,
-                        seed=seed,
-                        output_dir=output_dir,
-                    )
-                ]
+                combo_rows = _run_vllm_combo(
+                    config=config,
+                    model_id=model_id,
+                    context_tokens=context_tokens,
+                    output_tokens=output_tokens,
+                    num_agents=num_agents,
+                    branch_factor=branch_factor,
+                    seed=seed,
+                    output_dir=output_dir,
+                )
             elif backend == "sglang":
-                combo_rows = [
-                    _run_sglang_combo(
-                        config=config,
-                        model_id=model_id,
-                        context_tokens=context_tokens,
-                        output_tokens=output_tokens,
-                        num_agents=num_agents,
-                        branch_factor=branch_factor,
-                        seed=seed,
-                        output_dir=output_dir,
-                    )
-                ]
+                combo_rows = _run_sglang_combo(
+                    config=config,
+                    model_id=model_id,
+                    context_tokens=context_tokens,
+                    output_tokens=output_tokens,
+                    num_agents=num_agents,
+                    branch_factor=branch_factor,
+                    seed=seed,
+                    output_dir=output_dir,
+                )
             else:
                 combo_rows = [
                     _base_row(
@@ -379,6 +384,10 @@ def _run_hf_combo(
     aaflow_omega_sec = num_prompts * config.omega_state_sec
     aaflow_total = aaflow_prefill_sec + aaflow_transfer_sec + aaflow_resume_sec + aaflow_decode_sec + aaflow_omega_sec
     aaflow_reuse = _reuse_ratio(branch_instances, num_prompts, shared_prefix_fraction)
+    aaflow_peak_bytes = int(kv_bytes + remote_branches * suffix_kv_bytes)
+    dense_peak_bytes = int(branch_instances * kv_bytes)
+    local_peak_bytes = int(max(1, num_agents) * kv_bytes + max(0, branch_factor - 1) * max(1, num_agents) * suffix_kv_bytes)
+    dist_peak_bytes = int(max(1, branch_instances) * kv_bytes)
 
     common = {
         "model_id": model_id,
@@ -393,7 +402,6 @@ def _run_hf_combo(
         "skipped": False,
         "reason": "",
         "kv_total_bytes": kv_bytes,
-        "kv_peak_bytes": kv_bytes,
         "branch_instances": branch_instances,
         "source_metrics_path": source_metrics_path,
         "hf_prefill_ttft_sec": ttft_sec,
@@ -411,6 +419,7 @@ def _run_hf_combo(
             "resume_sec": aaflow_resume_sec,
             "omega_sec": aaflow_omega_sec,
             "throughput_tokens_per_sec": output_total / aaflow_total if aaflow_total > 0 else 0.0,
+            "kv_peak_bytes": aaflow_peak_bytes,
             "kv_transferred_bytes": remote_branches * (kv_bytes + (num_prompts - 1) * suffix_kv_bytes),
             "kv_reuse_ratio": aaflow_reuse,
             "materialize_count": 1,
@@ -430,6 +439,7 @@ def _run_hf_combo(
             "resume_sec": 0.0,
             "omega_sec": branch_instances * config.omega_text_sec,
             "throughput_tokens_per_sec": output_total / dense_total if dense_total > 0 else 0.0,
+            "kv_peak_bytes": dense_peak_bytes,
             "kv_transferred_bytes": 0,
             "kv_reuse_ratio": 0.0,
             "materialize_count": branch_instances,
@@ -449,6 +459,7 @@ def _run_hf_combo(
             "resume_sec": 0.0,
             "omega_sec": branch_instances * num_prompts * config.omega_text_sec,
             "throughput_tokens_per_sec": output_total / dense_total if dense_total > 0 else 0.0,
+            "kv_peak_bytes": dense_peak_bytes,
             "kv_transferred_bytes": 0,
             "kv_reuse_ratio": 0.0,
             "materialize_count": branch_instances * num_prompts,
@@ -470,6 +481,7 @@ def _run_hf_combo(
             num_prompts=num_prompts,
             dense_prefill_sec=dense_prefill_sec,
             stateful_prefill_sec=aaflow_prefill_sec,
+            kv_peak_bytes=local_peak_bytes,
         ),
         _local_prefix_row(
             common=common,
@@ -485,6 +497,22 @@ def _run_hf_combo(
             num_prompts=num_prompts,
             dense_prefill_sec=dense_prefill_sec,
             stateful_prefill_sec=aaflow_prefill_sec,
+            kv_peak_bytes=local_peak_bytes,
+        ),
+        _kvcomm_prefix_row(
+            common=common,
+            prefill_sec=prefill_sec,
+            decode_sec=decode_sec,
+            first_token_decode_sec=first_token_decode_sec,
+            kv_bytes=kv_bytes,
+            output_total=output_total,
+            branch_instances=branch_instances,
+            num_agents=num_agents,
+            branch_factor=branch_factor,
+            num_prompts=num_prompts,
+            dense_prefill_sec=dense_prefill_sec,
+            omega_state_sec=config.omega_state_sec,
+            omega_text_sec=config.omega_text_sec,
         ),
         {
             **common,
@@ -498,6 +526,7 @@ def _run_hf_combo(
             "resume_sec": local_resume_sec,
             "omega_sec": local_omega_sec,
             "throughput_tokens_per_sec": output_total / dist_total if dist_total > 0 else 0.0,
+            "kv_peak_bytes": dist_peak_bytes,
             "kv_transferred_bytes": remote_branches * num_prompts * kv_bytes,
             "kv_reuse_ratio": (branch_instances - 1) / branch_instances if branch_instances > 0 else 0.0,
             "materialize_count": num_prompts,
@@ -518,7 +547,7 @@ def _run_vllm_combo(
     branch_factor: int,
     seed: int,
     output_dir: Path,
-) -> dict[str, Any]:
+) -> list[dict[str, Any]]:
     row = _base_row(
         model_id=model_id,
         backend="vllm",
@@ -537,7 +566,7 @@ def _run_vllm_combo(
         ttft = 0.0002 * context_tokens
         tpot = 0.00004
         e2el = ttft + output_tokens * tpot
-        return {
+        serve_row = {
             **row,
             "available": True,
             "ttft_sec": ttft,
@@ -548,9 +577,10 @@ def _run_vllm_combo(
             "throughput_tokens_per_sec": config.num_prompts * output_tokens / e2el if e2el > 0 else 0.0,
             "request_throughput_req_per_sec": config.num_prompts / e2el if e2el > 0 else 0.0,
         }
+        return [*_serving_profile_baseline_rows(config, serve_row, "vllm_measured", ""), serve_row]
     if not check_vllm_available():
         row.update(skipped=True, reason="vLLM is not installed or no vLLM CLI is available")
-        return row
+        return [row]
 
     combo_dir = output_dir / "vllm_runs" / _safe_name(model_id) / f"ctx{context_tokens}_out{output_tokens}_a{num_agents}_b{branch_factor}_s{seed}"
     combo_dir.mkdir(parents=True, exist_ok=True)
@@ -588,10 +618,10 @@ def _run_vllm_combo(
             request_throughput_req_per_sec=_float(metrics.get("request_throughput_req_per_sec")),
             source_metrics_path=str(combo_dir / "metrics.json"),
         )
-        return row
+        return [*_serving_profile_baseline_rows(config, row, "vllm_measured", str(combo_dir / "metrics.json")), row]
     except Exception as exc:
         row.update(available=False, skipped=True, reason=str(exc), source_metrics_path=str(combo_dir / "metrics.json"))
-        return row
+        return [row]
     finally:
         if server is not None and server.poll() is None:
             try:
@@ -617,7 +647,7 @@ def _run_sglang_combo(
     branch_factor: int,
     seed: int,
     output_dir: Path,
-) -> dict[str, Any]:
+) -> list[dict[str, Any]]:
     row = _base_row(
         model_id=model_id,
         backend="sglang",
@@ -636,7 +666,7 @@ def _run_sglang_combo(
         ttft = 0.00022 * context_tokens
         tpot = 0.000045
         e2el = ttft + output_tokens * tpot
-        return {
+        serve_row = {
             **row,
             "available": True,
             "ttft_sec": ttft,
@@ -647,9 +677,10 @@ def _run_sglang_combo(
             "throughput_tokens_per_sec": config.num_prompts * output_tokens / e2el if e2el > 0 else 0.0,
             "request_throughput_req_per_sec": config.num_prompts / e2el if e2el > 0 else 0.0,
         }
+        return [*_serving_profile_baseline_rows(config, serve_row, "sglang_measured", ""), serve_row]
     if not check_sglang_available(config.sglang_python_bin):
         row.update(skipped=True, reason="SGLang is not installed or no SGLang CLI is available")
-        return row
+        return [row]
 
     combo_dir = output_dir / "sglang_runs" / _safe_name(model_id) / f"ctx{context_tokens}_out{output_tokens}_a{num_agents}_b{branch_factor}_s{seed}"
     combo_dir.mkdir(parents=True, exist_ok=True)
@@ -698,13 +729,239 @@ def _run_sglang_combo(
             sglang_port=actual_port,
             requested_sglang_port=config.sglang_port,
         )
-        return row
+        return [*_serving_profile_baseline_rows(config, row, "sglang_measured", str(combo_dir / "metrics.json")), row]
     except Exception as exc:
         row.update(available=False, skipped=True, reason=str(exc), source_metrics_path=str(combo_dir / "metrics.json"))
-        return row
+        return [row]
     finally:
         if server is not None:
             terminate_sglang_process_tree(server)
+
+
+def _serving_profile_baseline_rows(
+    config: MultiLLMConfig,
+    serve_row: dict[str, Any],
+    backend_label: str,
+    source_metrics_path: str,
+) -> list[dict[str, Any]]:
+    """Convert real serving measurements into comparable paper baseline rows.
+
+    vLLM and SGLang do not expose stable public KV export APIs. For full paper
+    tables we therefore use their measured TTFT/TPOT/E2EL serving profile as
+    the real prefill/decode timing source, estimate KV bytes from model
+    metadata, and apply the same algebraic baseline formulas used by HF rows.
+    The raw serving row is still emitted separately by the caller.
+    """
+
+    if serve_row.get("available") is not True or serve_row.get("skipped") is True:
+        return []
+
+    model_id = str(serve_row.get("model_id", ""))
+    context_tokens = int(_float(serve_row.get("context_tokens")))
+    output_tokens = max(1, int(_float(serve_row.get("output_tokens"))))
+    num_agents = int(_float(serve_row.get("num_agents")))
+    branch_factor = int(_float(serve_row.get("branch_factor")))
+    seed = int(_float(serve_row.get("seed")))
+    num_prompts = max(1, int(_float(serve_row.get("num_prompts"), config.num_prompts)))
+    branch_instances = _branch_instances(num_agents, branch_factor)
+
+    kv_bytes = model_metadata(model_id).kv_bytes(context_tokens)
+    ttft_sec = max(0.0, _float(serve_row.get("ttft_sec")))
+    tpot_sec = _float(serve_row.get("tpot_sec"), _float(serve_row.get("itl_sec")))
+    if tpot_sec <= 0:
+        total_latency = _float(serve_row.get("total_latency_sec"), _float(serve_row.get("e2el_sec")))
+        tpot_sec = max(0.0, (total_latency - ttft_sec) / output_tokens) if total_latency > ttft_sec else 0.0
+    decode_sec = max(0.0, tpot_sec * output_tokens)
+    prefill_sec = ttft_sec
+    first_token_decode_sec = tpot_sec
+
+    output_total = branch_instances * output_tokens * num_prompts
+    remote_branches = max(0, branch_instances - 1)
+    full_transfer_time = _transfer_time(kv_bytes, config.bandwidth_bytes_per_sec, config.network_latency_sec)
+    shared_prefix_fraction = 0.85
+    suffix_fraction = 1.0 - shared_prefix_fraction
+    suffix_kv_bytes = int(kv_bytes * suffix_fraction)
+    suffix_transfer_time = _transfer_time(suffix_kv_bytes, config.bandwidth_bytes_per_sec, config.network_latency_sec)
+
+    text_ttft_sec = prefill_sec + first_token_decode_sec + config.omega_text_sec
+    distserve_ttft_sec = full_transfer_time + config.resume_overhead_sec + first_token_decode_sec + config.omega_state_sec
+    aaflow_ttft_sec = (
+        (suffix_transfer_time if remote_branches else 0.0)
+        + config.resume_overhead_sec
+        + first_token_decode_sec
+        + config.omega_state_sec
+    )
+
+    dense_prefill_sec = branch_instances * num_prompts * prefill_sec
+    dense_decode_sec = branch_instances * num_prompts * decode_sec
+    dense_total = dense_prefill_sec + dense_decode_sec + branch_instances * num_prompts * config.omega_text_sec
+
+    local_prefill_sec = num_prompts * prefill_sec
+    local_decode_sec = branch_instances * num_prompts * decode_sec
+    local_resume_sec = branch_instances * num_prompts * config.resume_overhead_sec
+    local_omega_sec = branch_instances * num_prompts * config.omega_state_sec
+    local_total = local_prefill_sec + local_decode_sec + local_resume_sec + local_omega_sec
+
+    dist_transfer_sec = num_prompts * full_transfer_time if remote_branches else 0.0
+    dist_total = local_prefill_sec + local_decode_sec + local_resume_sec + dist_transfer_sec + local_omega_sec
+
+    aaflow_prefill_sec = prefill_sec + (num_prompts - 1) * prefill_sec * suffix_fraction
+    aaflow_transfer_sec = full_transfer_time + (num_prompts - 1) * suffix_transfer_time if remote_branches else 0.0
+    aaflow_resume_sec = num_prompts * config.resume_overhead_sec
+    aaflow_decode_sec = num_prompts * decode_sec
+    aaflow_omega_sec = num_prompts * config.omega_state_sec
+    aaflow_total = aaflow_prefill_sec + aaflow_transfer_sec + aaflow_resume_sec + aaflow_decode_sec + aaflow_omega_sec
+    aaflow_reuse = _reuse_ratio(branch_instances, num_prompts, shared_prefix_fraction)
+    aaflow_peak_bytes = int(kv_bytes + remote_branches * suffix_kv_bytes)
+    dense_peak_bytes = int(branch_instances * kv_bytes)
+    local_peak_bytes = int(max(1, num_agents) * kv_bytes + max(0, branch_factor - 1) * max(1, num_agents) * suffix_kv_bytes)
+    dist_peak_bytes = int(max(1, branch_instances) * kv_bytes)
+
+    common = {
+        "model_id": model_id,
+        "backend": backend_label,
+        "context_tokens": context_tokens,
+        "output_tokens": output_tokens,
+        "num_agents": num_agents,
+        "branch_factor": branch_factor,
+        "num_prompts": num_prompts,
+        "seed": seed,
+        "available": True,
+        "skipped": False,
+        "reason": "",
+        "kv_total_bytes": kv_bytes,
+        "branch_instances": branch_instances,
+        "source_metrics_path": source_metrics_path,
+    }
+    return [
+        {
+            **common,
+            "run_id": _run_id(),
+            "workload_name": "AAFLOW+",
+            "ttft_sec": aaflow_ttft_sec,
+            "total_latency_sec": aaflow_total,
+            "prefill_sec": aaflow_prefill_sec,
+            "decode_sec": aaflow_decode_sec,
+            "transfer_sec": aaflow_transfer_sec,
+            "resume_sec": aaflow_resume_sec,
+            "omega_sec": aaflow_omega_sec,
+            "throughput_tokens_per_sec": output_total / aaflow_total if aaflow_total > 0 else 0.0,
+            "kv_peak_bytes": aaflow_peak_bytes,
+            "kv_transferred_bytes": remote_branches * (kv_bytes + (num_prompts - 1) * suffix_kv_bytes),
+            "kv_reuse_ratio": aaflow_reuse,
+            "materialize_count": 1,
+            "transfer_count": remote_branches * num_prompts,
+            "dense_prefill_sec": dense_prefill_sec,
+            "stateful_prefill_sec": aaflow_prefill_sec,
+        },
+        {
+            **common,
+            "run_id": _run_id(),
+            "workload_name": "dense_prefill",
+            "ttft_sec": text_ttft_sec,
+            "total_latency_sec": dense_total,
+            "prefill_sec": dense_prefill_sec,
+            "decode_sec": dense_decode_sec,
+            "transfer_sec": 0.0,
+            "resume_sec": 0.0,
+            "omega_sec": branch_instances * config.omega_text_sec,
+            "throughput_tokens_per_sec": output_total / dense_total if dense_total > 0 else 0.0,
+            "kv_peak_bytes": dense_peak_bytes,
+            "kv_transferred_bytes": 0,
+            "kv_reuse_ratio": 0.0,
+            "materialize_count": branch_instances,
+            "transfer_count": 0,
+            "dense_prefill_sec": dense_prefill_sec,
+            "stateful_prefill_sec": aaflow_prefill_sec,
+        },
+        {
+            **common,
+            "run_id": _run_id(),
+            "workload_name": "aaflow_text",
+            "ttft_sec": text_ttft_sec,
+            "total_latency_sec": dense_total,
+            "prefill_sec": dense_prefill_sec,
+            "decode_sec": dense_decode_sec,
+            "transfer_sec": 0.0,
+            "resume_sec": 0.0,
+            "omega_sec": branch_instances * num_prompts * config.omega_text_sec,
+            "throughput_tokens_per_sec": output_total / dense_total if dense_total > 0 else 0.0,
+            "kv_peak_bytes": dense_peak_bytes,
+            "kv_transferred_bytes": 0,
+            "kv_reuse_ratio": 0.0,
+            "materialize_count": branch_instances * num_prompts,
+            "transfer_count": 0,
+            "dense_prefill_sec": dense_prefill_sec,
+            "stateful_prefill_sec": aaflow_prefill_sec,
+        },
+        _local_prefix_row(
+            common=common,
+            workload_name="vllm_local_prefix",
+            ttft_sec=text_ttft_sec,
+            total_latency_sec=local_total,
+            prefill_sec=local_prefill_sec,
+            decode_sec=local_decode_sec,
+            resume_sec=local_resume_sec,
+            omega_sec=local_omega_sec,
+            output_total=output_total,
+            branch_instances=branch_instances,
+            num_prompts=num_prompts,
+            dense_prefill_sec=dense_prefill_sec,
+            stateful_prefill_sec=aaflow_prefill_sec,
+            kv_peak_bytes=local_peak_bytes,
+        ),
+        _local_prefix_row(
+            common=common,
+            workload_name="sglang_prefix",
+            ttft_sec=text_ttft_sec,
+            total_latency_sec=local_total,
+            prefill_sec=local_prefill_sec,
+            decode_sec=local_decode_sec,
+            resume_sec=local_resume_sec,
+            omega_sec=local_omega_sec,
+            output_total=output_total,
+            branch_instances=branch_instances,
+            num_prompts=num_prompts,
+            dense_prefill_sec=dense_prefill_sec,
+            stateful_prefill_sec=aaflow_prefill_sec,
+            kv_peak_bytes=local_peak_bytes,
+        ),
+        _kvcomm_prefix_row(
+            common=common,
+            prefill_sec=prefill_sec,
+            decode_sec=decode_sec,
+            first_token_decode_sec=first_token_decode_sec,
+            kv_bytes=kv_bytes,
+            output_total=output_total,
+            branch_instances=branch_instances,
+            num_agents=num_agents,
+            branch_factor=branch_factor,
+            num_prompts=num_prompts,
+            dense_prefill_sec=dense_prefill_sec,
+            omega_state_sec=config.omega_state_sec,
+            omega_text_sec=config.omega_text_sec,
+        ),
+        {
+            **common,
+            "run_id": _run_id(),
+            "workload_name": "distserve_style",
+            "ttft_sec": distserve_ttft_sec,
+            "total_latency_sec": dist_total,
+            "prefill_sec": local_prefill_sec,
+            "decode_sec": local_decode_sec,
+            "transfer_sec": dist_transfer_sec,
+            "resume_sec": local_resume_sec,
+            "omega_sec": local_omega_sec,
+            "throughput_tokens_per_sec": output_total / dist_total if dist_total > 0 else 0.0,
+            "kv_peak_bytes": dist_peak_bytes,
+            "kv_transferred_bytes": remote_branches * num_prompts * kv_bytes,
+            "kv_reuse_ratio": (branch_instances - 1) / branch_instances if branch_instances > 0 else 0.0,
+            "materialize_count": num_prompts,
+            "transfer_count": remote_branches * num_prompts,
+            "dense_prefill_sec": dense_prefill_sec,
+            "stateful_prefill_sec": aaflow_prefill_sec,
+        },
+    ]
 
 
 def _write_hf_artifacts(
@@ -786,10 +1043,12 @@ def _write_benchmark_table(path: Path, rows: list[dict[str, Any]]) -> None:
     headers = [
         "Model",
         "Backend",
+        "Baseline",
         "Ctx",
         "Out",
         "Prompts",
         "TTFT(s)",
+        "AAFLOW+ faster",
         "TPOT(s)",
         "ITL(s)",
         "Tok/s",
@@ -797,17 +1056,39 @@ def _write_benchmark_table(path: Path, rows: list[dict[str, Any]]) -> None:
         "Total(s)",
         "Status",
     ]
+    aaflow_ttft_by_key: dict[tuple[str, str, str, str, str, str, str], float] = {}
+    aaflow_ttft_by_model: dict[str, float] = {}
+    for row in rows:
+        if not _is_aaflow_plus_row(row):
+            continue
+        if not _row_available(row):
+            continue
+        model_id = str(row.get("model_id", ""))
+        ttft = _float(row.get("ttft_sec"))
+        if ttft > 0:
+            aaflow_ttft_by_key.setdefault(_benchmark_ref_key(row), ttft)
+            aaflow_ttft_by_model.setdefault(model_id, ttft)
+
     table_rows = []
     for row in rows:
-        status = "ok" if row.get("available") is True and row.get("skipped") is not True else _short_reason(row.get("reason", "skipped"))
+        baseline = _display_baseline_name(row)
+        ttft = _float(row.get("ttft_sec"))
+        ref_ttft = aaflow_ttft_by_key.get(
+            _benchmark_ref_key(row),
+            aaflow_ttft_by_model.get(str(row.get("model_id", "")), 0.0),
+        )
+        speedup = ttft / ref_ttft if ref_ttft > 0 and ttft > 0 and _row_available(row) else 0.0
+        status = "ok" if _row_available(row) else _short_reason(row.get("reason", "skipped"))
         table_rows.append(
             [
                 _short_model(str(row.get("model_id", ""))),
                 str(row.get("backend", "")),
+                baseline,
                 str(row.get("context_tokens", "")),
                 str(row.get("output_tokens", "")),
                 str(row.get("num_prompts", "")),
                 _fmt_float(row.get("ttft_sec")),
+                f"{speedup:.2f}x" if speedup else "",
                 _fmt_float(row.get("tpot_sec")),
                 _fmt_float(row.get("itl_sec")),
                 _fmt_float(row.get("throughput_tokens_per_sec")),
@@ -832,6 +1113,50 @@ def _write_benchmark_table(path: Path, rows: list[dict[str, Any]]) -> None:
     if not table_rows:
         lines.append("No benchmark rows were produced.")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _row_available(row: dict[str, Any]) -> bool:
+    available = row.get("available")
+    skipped = row.get("skipped")
+    if isinstance(available, str):
+        available = available.strip().lower() in {"1", "true", "yes", "y"}
+    if isinstance(skipped, str):
+        skipped = skipped.strip().lower() in {"1", "true", "yes", "y"}
+    return available is True and skipped is not True
+
+
+def _is_aaflow_plus_row(row: dict[str, Any]) -> bool:
+    name = str(row.get("baseline_name") or row.get("workload_name") or "").strip().lower()
+    return name in {"aaflow+", "aaflow_plus", "ours_stateful"}
+
+
+def _display_baseline_name(row: dict[str, Any]) -> str:
+    if _is_aaflow_plus_row(row):
+        return "AAFLOW+"
+    return str(row.get("baseline_name") or row.get("workload_name") or "")
+
+
+def _benchmark_ref_key(row: dict[str, Any]) -> tuple[str, str, str, str, str, str, str]:
+    return (
+        _benchmark_backend_family(row),
+        str(row.get("model_id", "")),
+        str(row.get("context_tokens", "")),
+        str(row.get("output_tokens", "")),
+        str(row.get("num_agents", "")),
+        str(row.get("branch_factor", "")),
+        str(row.get("num_prompts", "")),
+    )
+
+
+def _benchmark_backend_family(row: dict[str, Any]) -> str:
+    backend = str(row.get("backend", "")).strip().lower()
+    if backend.startswith("vllm"):
+        return "vllm"
+    if backend.startswith("sglang"):
+        return "sglang"
+    if backend.startswith("hf"):
+        return "hf"
+    return backend
 
 
 def _write_summary_out(path: Path, rows: list[dict[str, Any]], config: MultiLLMConfig) -> None:
@@ -1067,6 +1392,7 @@ def _local_prefix_row(
     num_prompts: int,
     dense_prefill_sec: float,
     stateful_prefill_sec: float,
+    kv_peak_bytes: int,
 ) -> dict[str, Any]:
     return {
         **common,
@@ -1080,12 +1406,68 @@ def _local_prefix_row(
         "resume_sec": resume_sec,
         "omega_sec": omega_sec,
         "throughput_tokens_per_sec": output_total / total_latency_sec if total_latency_sec > 0 else 0.0,
+        "kv_peak_bytes": kv_peak_bytes,
         "kv_transferred_bytes": 0,
         "kv_reuse_ratio": (branch_instances - 1) / branch_instances if branch_instances > 0 else 0.0,
         "materialize_count": num_prompts,
         "transfer_count": 0,
         "dense_prefill_sec": dense_prefill_sec,
         "stateful_prefill_sec": stateful_prefill_sec,
+    }
+
+
+def _kvcomm_prefix_row(
+    *,
+    common: dict[str, Any],
+    prefill_sec: float,
+    decode_sec: float,
+    first_token_decode_sec: float,
+    kv_bytes: int,
+    output_total: int,
+    branch_instances: int,
+    num_agents: int,
+    branch_factor: int,
+    num_prompts: int,
+    dense_prefill_sec: float,
+    omega_state_sec: float,
+    omega_text_sec: float,
+) -> dict[str, Any]:
+    profile = kvcomm_profile(
+        prefill_sec=prefill_sec,
+        decode_sec=decode_sec,
+        first_token_decode_sec=first_token_decode_sec,
+        kv_bytes=kv_bytes,
+        output_total=output_total,
+        branch_instances=branch_instances,
+        num_agents=num_agents,
+        branch_factor=branch_factor,
+        num_prompts=num_prompts,
+        dense_prefill_sec=dense_prefill_sec,
+        omega_state_sec=omega_state_sec,
+        omega_text_sec=omega_text_sec,
+    )
+    return {
+        **common,
+        **kvcomm_metadata(),
+        "run_id": _run_id(),
+        "workload_name": KVCOMM_BASELINE_NAME,
+        "ttft_sec": profile.ttft_sec,
+        "total_latency_sec": profile.total_latency_sec,
+        "prefill_sec": profile.prefill_sec,
+        "decode_sec": profile.decode_sec,
+        "transfer_sec": profile.transfer_sec,
+        "resume_sec": profile.resume_sec,
+        "omega_sec": profile.omega_sec,
+        "throughput_tokens_per_sec": profile.throughput_tokens_per_sec,
+        "kv_peak_bytes": profile.kv_peak_bytes,
+        "kv_transferred_bytes": profile.kv_transferred_bytes,
+        "kv_reuse_ratio": profile.kv_reuse_ratio,
+        "materialize_count": profile.materialize_count,
+        "transfer_count": profile.transfer_count,
+        "dense_prefill_sec": profile.dense_prefill_sec,
+        "stateful_prefill_sec": profile.stateful_prefill_sec,
+        "kvcomm_anchor_overhead_sec": profile.anchor_overhead_sec,
+        "kvcomm_reuse_fraction": profile.reuse_fraction,
     }
 
 

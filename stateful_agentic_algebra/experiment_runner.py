@@ -56,6 +56,7 @@ BASELINE_NAMES = [
     "aaflow_text",
     "vllm_local_prefix",
     "sglang_prefix",
+    "kvcomm_prefix",
     "distserve_style",
 ]
 BASELINE_ALIASES = {
@@ -783,6 +784,7 @@ def _write_benchmark_table(path: Path, results: list[dict[str, Any]], skipped: l
         "Branch",
         "Req",
         "TTFT(s)",
+        "AAFLOW+ faster",
         "Total(s)",
         "Prefill(s)",
         "Transfer(s)",
@@ -791,19 +793,35 @@ def _write_benchmark_table(path: Path, results: list[dict[str, Any]], skipped: l
         "Reuse",
         "Status",
     ]
+    aaflow_refs: dict[tuple[str, str, str, str, str], float] = {}
+    aaflow_refs_by_workload: dict[str, float] = {}
+    for row in results:
+        if not _is_aaflow_plus_row(row):
+            continue
+        workload = str(row.get("workload_name", ""))
+        ttft = _number(row.get("ttft_sec"))
+        if workload and ttft > 0:
+            aaflow_refs.setdefault(_benchmark_ref_key(row), ttft)
+            aaflow_refs_by_workload.setdefault(workload, ttft)
+
     table_rows = []
     for row in [*results, *skipped]:
         status = "ok" if not row.get("skipped") else _short_reason(row.get("reason", "skipped"))
         kv_mib = _number(row.get("kv_peak_bytes"), default=0.0) / (1024 * 1024)
+        workload = str(row.get("workload_name", ""))
+        ttft = _number(row.get("ttft_sec"))
+        ref_ttft = aaflow_refs.get(_benchmark_ref_key(row), aaflow_refs_by_workload.get(workload, 0.0))
+        speedup = ttft / ref_ttft if ref_ttft > 0 and ttft > 0 and not row.get("skipped") else 0.0
         table_rows.append(
             [
-                str(row.get("baseline_name", "")),
+                _display_baseline_name(row),
                 str(row.get("workload_name", "")),
                 str(row.get("context_tokens", "")),
                 str(row.get("num_agents", "")),
                 str(row.get("branch_factor", "")),
                 str(row.get("num_requests", "")),
                 _fmt_float(row.get("ttft_sec")),
+                f"{speedup:.2f}x" if speedup else "",
                 _fmt_float(row.get("total_latency_sec")),
                 _fmt_float(row.get("prefill_sec")),
                 _fmt_float(row.get("transfer_sec")),
@@ -828,6 +846,27 @@ def _write_benchmark_table(path: Path, results: list[dict[str, Any]], skipped: l
     if not table_rows:
         lines.append("No benchmark rows were produced.")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _benchmark_ref_key(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
+    return (
+        str(row.get("workload_name", "")),
+        str(row.get("context_tokens", "")),
+        str(row.get("num_agents", "")),
+        str(row.get("branch_factor", "")),
+        str(row.get("num_requests", "")),
+    )
+
+
+def _is_aaflow_plus_row(row: dict[str, Any]) -> bool:
+    name = str(row.get("baseline_name", "")).strip().lower()
+    return name in {"aaflow+", "aaflow_plus", "ours_stateful"}
+
+
+def _display_baseline_name(row: dict[str, Any]) -> str:
+    if _is_aaflow_plus_row(row):
+        return "AAFLOW+"
+    return str(row.get("baseline_name", ""))
 
 
 def _write_summary_out(

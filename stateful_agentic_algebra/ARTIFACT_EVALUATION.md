@@ -379,6 +379,10 @@ Recommended workflow:
 - `aaflow_text`: optional AAFLOW text baseline.
 - `vllm_local_prefix`: optional vLLM local-prefix baseline.
 - `sglang_prefix`: optional SGLang prefix baseline.
+- `kvcomm_prefix`: KVCOMM-style anchor-based cross-context KV reuse baseline.
+  Real KVCOMM is a separate project; set `KVCOMM_REPO` to a FastMAS/KVCOMM
+  checkout if available. Otherwise the artifact uses a measured-profile
+  simulation with anchor-processing overhead.
 - `distserve_style`: simulated disaggregated prefill/decode baseline.
 
 ## Metrics

@@ -565,6 +565,11 @@ and PDF.
 - `sglang_prefix`: optional SGLang prefix baseline. If SGLang is installed, it
   is labeled as SGLang-backed; if not, the runner emits simulated SGLang-prefix
   metrics with a clear reason instead of dropping all rows.
+- `kvcomm_prefix`: KVCOMM-style anchor-based cross-context KV reuse baseline
+  based on the FastMAS/KVCOMM implementation. If `KVCOMM_REPO` points to a
+  checkout, metadata records that availability; otherwise full-paper sweeps use
+  a measured-profile simulation with anchor matching, offset approximation, and
+  anchor-prediction overhead.
 - `distserve_style`: simulated disaggregated prefill/decode baseline. It is
   labeled as DistServe-style simulation, not an exact DistServe implementation.
 
@@ -638,6 +643,9 @@ Plotting:
 - Missing SGLang: `sglang_prefix` falls back to simulated prefix metrics, and
   the real `sglang` backend is skipped unless SGLang is available through
   `SGLANG_PYTHON_BIN` or the active Python environment.
+- Missing KVCOMM checkout: `kvcomm_prefix` still runs as a measured-profile
+  baseline. Set `KVCOMM_REPO=/path/to/KVCOMM` to record an external KVCOMM
+  checkout in metadata.
 - Missing Hugging Face packages: mock mode still works; install
   `transformers`, `torch`, and `huggingface_hub` for HF runs.
 - Gated model access: request access on Hugging Face and export

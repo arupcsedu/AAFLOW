@@ -4,7 +4,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH -A bii_dsc_community
-#SBATCH --partition=gpu
+#SBATCH --partition=bii-gpu
+#SBATCH --reservation=bi_fox_dgx
 #SBATCH --gres=gpu:a100:1
 #SBATCH --mem=96G
 #SBATCH --time=04:00:00

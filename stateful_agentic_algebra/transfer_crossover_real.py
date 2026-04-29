@@ -216,7 +216,12 @@ def write_outputs(rows: list[dict[str, Any]], output_dir: str | Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
     _write_csv(out / "crossover.csv", rows)
     (out / "crossover.json").write_text(json.dumps({"rows": rows}, indent=2, sort_keys=True), encoding="utf-8")
-    _plot_transfer_vs_recompute(rows, out / "plot_transfer_vs_recompute")
+    try:
+        _plot_transfer_vs_recompute(rows, out / "plot_transfer_vs_recompute")
+    except Exception as exc:
+        logs = out / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        (logs / "plots.err").write_text(f"plot generation failed: {exc}\n", encoding="utf-8")
 
 
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -277,6 +282,7 @@ def _plot_transfer_vs_recompute(rows: list[dict[str, Any]], stem: Path) -> None:
     fig.tight_layout()
     fig.savefig(stem.with_suffix(".png"), dpi=240)
     fig.savefig(stem.with_suffix(".pdf"))
+    fig.savefig(stem.with_suffix(".svg"))
     plt.close(fig)
 
 

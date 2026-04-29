@@ -4,6 +4,7 @@ baselines:
   - aaflow_text
   - vllm_local_prefix
   - sglang_prefix
+  - kvcomm_prefix
   - distserve_style
 workloads:
   - linear_handoff
