@@ -29,6 +29,7 @@ import csv
 import itertools
 import json
 import shlex
+import shutil
 import sys
 import time
 import uuid
@@ -372,7 +373,7 @@ def _run_hf_combo(
     local_omega_sec = branch_instances * num_prompts * config.omega_state_sec
     local_total = local_prefill_sec + local_decode_sec + local_resume_sec + local_omega_sec
 
-    dist_transfer_sec = num_prompts * full_transfer_time if remote_branches else 0.0
+    dist_transfer_sec = remote_branches * num_prompts * full_transfer_time if remote_branches else 0.0
     dist_total = local_prefill_sec + local_decode_sec + local_resume_sec + dist_transfer_sec + local_omega_sec
 
     aaflow_prefill_sec = prefill_sec + (num_prompts - 1) * prefill_sec * suffix_fraction
@@ -683,6 +684,8 @@ def _run_sglang_combo(
         return [row]
 
     combo_dir = output_dir / "sglang_runs" / _safe_name(model_id) / f"ctx{context_tokens}_out{output_tokens}_a{num_agents}_b{branch_factor}_s{seed}"
+    if combo_dir.exists():
+        shutil.rmtree(combo_dir)
     combo_dir.mkdir(parents=True, exist_ok=True)
     server = None
     try:
@@ -717,7 +720,7 @@ def _run_sglang_combo(
         row.update(
             available=bool(metrics.get("available", False)),
             skipped=False,
-            reason=str(metrics.get("reason", "")),
+            reason=_clean_text(metrics.get("reason", "")),
             ttft_sec=_float(metrics.get("ttft_sec")),
             total_latency_sec=_float(metrics.get("e2el_sec", metrics.get("total_latency_sec", metrics.get("bench_elapsed_sec")))),
             throughput_tokens_per_sec=_float(metrics.get("throughput_tokens_per_sec")),
@@ -731,7 +734,7 @@ def _run_sglang_combo(
         )
         return [*_serving_profile_baseline_rows(config, row, "sglang_measured", str(combo_dir / "metrics.json")), row]
     except Exception as exc:
-        row.update(available=False, skipped=True, reason=str(exc), source_metrics_path=str(combo_dir / "metrics.json"))
+        row.update(available=False, skipped=True, reason=_clean_text(exc), source_metrics_path=str(combo_dir / "metrics.json"))
         return [row]
     finally:
         if server is not None:
@@ -802,7 +805,7 @@ def _serving_profile_baseline_rows(
     local_omega_sec = branch_instances * num_prompts * config.omega_state_sec
     local_total = local_prefill_sec + local_decode_sec + local_resume_sec + local_omega_sec
 
-    dist_transfer_sec = num_prompts * full_transfer_time if remote_branches else 0.0
+    dist_transfer_sec = remote_branches * num_prompts * full_transfer_time if remote_branches else 0.0
     dist_total = local_prefill_sec + local_decode_sec + local_resume_sec + dist_transfer_sec + local_omega_sec
 
     aaflow_prefill_sec = prefill_sec + (num_prompts - 1) * prefill_sec * suffix_fraction
@@ -1585,7 +1588,13 @@ def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(row)
     for field in RESULT_FIELDS:
         normalized.setdefault(field, "")
+    normalized["reason"] = _clean_text(normalized.get("reason", ""))
     return normalized
+
+
+def _clean_text(value: Any) -> str:
+    text = str(value or "")
+    return "".join(ch if ch in "\n\t\r" or ord(ch) >= 32 else " " for ch in text)
 
 
 def _transfer_time(kv_bytes: int, bandwidth_bytes_per_sec: float, latency_sec: float) -> float:

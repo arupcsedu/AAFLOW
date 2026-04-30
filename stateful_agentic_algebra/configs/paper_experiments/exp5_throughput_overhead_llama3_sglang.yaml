@@ -21,7 +21,7 @@ hf_device: auto
 progress: true
 skip_invalid_context: true
 output_dir: runs/stateful/full_paper/exp5_throughput_overhead_llama3_sglang
-sglang_server_extra_args: --disable-overlap-schedule --disable-cuda-graph --skip-server-warmup --context-length 8192 --max-prefill-tokens 8192
+sglang_server_extra_args: --disable-overlap-schedule --disable-cuda-graph --disable-piecewise-cuda-graph --skip-server-warmup --context-length 8192 --max-prefill-tokens 8192
 context_grid:
   - 1024
   - 4096

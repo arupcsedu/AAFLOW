@@ -20,7 +20,7 @@ hf_device: auto
 progress: true
 skip_invalid_context: true
 output_dir: runs/stateful/full_paper/exp2_multi_agent_scaling_mistral_sglang
-sglang_server_extra_args: --disable-overlap-schedule --disable-cuda-graph --skip-server-warmup --context-length 32768 --max-prefill-tokens 32768
+sglang_server_extra_args: --disable-overlap-schedule --disable-cuda-graph --disable-piecewise-cuda-graph --skip-server-warmup --context-length 32768 --max-prefill-tokens 32768
 context_grid:
   - 8192
 agent_grid:

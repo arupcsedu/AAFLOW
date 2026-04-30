@@ -27,7 +27,7 @@ from typing import Any, Iterable
 
 from .config_utils import bool_default, config_value, csv_default, load_config_file
 from .consistency_benchmark import run_consistency_benchmark
-from .multi_llm_runner import MultiLLMConfig, run_matrix
+from .multi_llm_runner import MultiLLMConfig, run_matrix, _write_summary_out
 from .plots import generate_real_llm_plots
 from .transfer_crossover_real import analyze_crossover, parse_bandwidths, parse_latencies, write_outputs
 
@@ -50,6 +50,10 @@ def run_paper_experiment(config: dict[str, Any]) -> Path:
         rows = run_matrix(matrix_config)
         _write_matrix_benchmark(output_dir / "benchmark.out", rows, experiment_id)
         _generate_figures(output_dir, experiment_id=experiment_id)
+        _write_summary_out(output_dir / "summary.out", rows, matrix_config)
+        (output_dir / "config.json").write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
+    if not (output_dir / "summary.out").exists():
+        _write_artifact_summary(output_dir / "summary.out", config, experiment_id)
     return output_dir
 
 
@@ -106,10 +110,10 @@ def _multi_llm_config(config: dict[str, Any], output_dir: Path) -> MultiLLMConfi
         omega_state_sec=float(config_value(config, "omega_state_sec", default=0.00005)),
         omega_text_sec=float(config_value(config, "omega_text_sec", default=0.00005)),
         tensor_parallel_size=int(config_value(config, "tensor_parallel_size", default=2)),
-        vllm_port=int(config_value(config, "vllm_port", default=8000)),
+        vllm_port=int(config_value(config, "vllm_port", default=os.environ.get("VLLM_PORT", 8000))),
         vllm_server_timeout_sec=float(config_value(config, "vllm_server_timeout_sec", default=900.0)),
         vllm_bench_timeout_sec=float(config_value(config, "vllm_bench_timeout_sec", default=1800.0)),
-        sglang_port=int(config_value(config, "sglang_port", default=30000)),
+        sglang_port=int(config_value(config, "sglang_port", default=os.environ.get("SGLANG_PORT", 30000))),
         sglang_server_timeout_sec=float(config_value(config, "sglang_server_timeout_sec", default=900.0)),
         sglang_bench_timeout_sec=float(config_value(config, "sglang_bench_timeout_sec", default=1800.0)),
         sglang_python_bin=str(config_value(config, "sglang_python_bin", default=os.environ.get("SGLANG_PYTHON_BIN", ""))),
@@ -131,6 +135,58 @@ def _generate_figures(output_dir: Path, source_csv: Path | None = None, experime
             logs = output_dir / "logs"
             logs.mkdir(parents=True, exist_ok=True)
             (logs / "plots.err").write_text(f"plot generation failed: {exc}\n", encoding="utf-8")
+
+
+def _write_artifact_summary(path: Path, config: dict[str, Any], experiment_id: int) -> None:
+    output_dir = path.parent
+    row_count = 0
+    data_file = ""
+    for name in ("results.csv", "crossover.csv", "consistency.csv"):
+        candidate = output_dir / name
+        if candidate.exists() and candidate.stat().st_size > 0:
+            data_file = name
+            with candidate.open(newline="", encoding="utf-8") as handle:
+                row_count = max(0, sum(1 for _ in csv.reader(handle)) - 1)
+            break
+
+    lines = [
+        "Stateful Agentic Algebra Run Summary",
+        "=" * 38,
+        f"Experiment: {experiment_id}",
+        f"Output directory: {output_dir}",
+        f"Data file: {data_file or 'missing'}",
+        f"Rows: {row_count}",
+        "",
+        "Configuration",
+        "-" * 13,
+        f"models: {config.get('models', [config.get('model_id', '')])}",
+        f"backends: {config.get('backends', [config.get('backend', '')])}",
+        f"context_grid: {config.get('context_grid', config.get('context_tokens', ''))}",
+        f"output_grid: {config.get('output_grid', config.get('output_tokens', ''))}",
+        "",
+        "Output Files",
+        "-" * 12,
+    ]
+    for rel in [
+        "config.json",
+        "results.csv",
+        "crossover.csv",
+        "consistency.csv",
+        "benchmark.out",
+        "figures",
+        "logs/plots.err",
+    ]:
+        lines.append(_inventory_line(output_dir / rel, rel))
+    lines.append("summary.out: file (this file)")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _inventory_line(path: Path, label: str) -> str:
+    if path.is_dir():
+        return f"{label}: directory ({sum(1 for _ in path.rglob('*'))} entries)"
+    if path.exists():
+        return f"{label}: file ({path.stat().st_size} bytes)"
+    return f"{label}: missing"
 
 
 def _plot_names_for_experiment(experiment_id: int | None) -> list[str] | None:

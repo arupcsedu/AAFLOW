@@ -104,7 +104,7 @@ def _config_for(exp_id: int, exp_name: str, model_key: str, model: dict[str, Any
     }
     if backend == "sglang":
         common["sglang_server_extra_args"] = (
-            "--disable-overlap-schedule --disable-cuda-graph --skip-server-warmup "
+            "--disable-overlap-schedule --disable-cuda-graph --disable-piecewise-cuda-graph --skip-server-warmup "
             f"--context-length {model['sglang_context']} --max-prefill-tokens {model['sglang_context']}"
         )
 

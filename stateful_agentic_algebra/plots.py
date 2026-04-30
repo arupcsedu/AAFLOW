@@ -908,12 +908,22 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--results", required=True, help="Path to experiment results.csv")
     parser.add_argument("--output-dir", required=True, help="Directory for generated figures")
     parser.add_argument("--real-llm", action="store_true", help="Generate real LLM benchmark figures")
+    parser.add_argument(
+        "--plot-names",
+        default="",
+        help="Comma-separated real-LLM plot function names to generate; defaults to all plots.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
-    saved = generate_real_llm_plots(args.results, args.output_dir) if args.real_llm else generate_all_plots(args.results, args.output_dir)
+    plot_names = [item.strip() for item in args.plot_names.split(",") if item.strip()] or None
+    saved = (
+        generate_real_llm_plots(args.results, args.output_dir, plot_names=plot_names)
+        if args.real_llm
+        else generate_all_plots(args.results, args.output_dir)
+    )
     print(f"wrote {len(saved)} files to {args.output_dir}")
 
 
