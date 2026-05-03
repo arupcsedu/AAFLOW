@@ -297,8 +297,8 @@ def _plot_real_speedup_vs_agents(plt: Any, rows: list[dict[str, Any]], stem: Pat
         "Number of Agents",
         "Speedup (baseline / AAFLOW+)",
         "Speedup vs Number of Agents",
-        legend_loc="center left",
-        legend_bbox=(1.02, 0.5),
+        legend_loc="center right",
+        legend_bbox=(0.98, 0.40),
     )
     return _save_png_pdf(plt, fig, stem)
 
