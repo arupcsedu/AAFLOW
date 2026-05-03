@@ -1,12 +1,12 @@
 # Stateful Agentic Algebra
 
 Stateful Agentic Algebra is a standalone experimental layer for evaluating
-state reuse in agentic LLM workflows. It is implemented under
+state reuse in agentic LLM workflows. It lives under
 `stateful_agentic_algebra/` and does not rewrite the existing AAFLOW pipeline.
 
-The package can run entirely in mock CPU mode. Optional integrations with
-AAFLOW, Hugging Face Transformers, vLLM, SGLang, UCX, NCCL, and CUDA are loaded
-lazily and skipped or simulated when unavailable.
+The package can run entirely in CPU/mock mode. Optional integrations with
+AAFLOW, Hugging Face Transformers, vLLM, SGLang, KVCOMM, UCX, NCCL, and CUDA
+are loaded lazily and skipped or simulated when unavailable.
 
 ## What It Implements
 
@@ -21,8 +21,8 @@ The module models agentic execution as a stateful graph:
   - `kv_fork`
   - restricted `kv_merge`
   - `kv_evict`
-- A compiler that lowers workflow templates into
-  `G_s = (V, E_d, E_s)`, separating data edges from state edges.
+- A compiler that lowers workflow templates into `G_s = (V, E_d, E_s)`,
+  separating data edges from state edges.
 - A scheduler that decides whether to transfer KV state or recompute from text.
 - A runtime that executes compiled mock workflows and records a shared metric
   schema.
@@ -31,105 +31,247 @@ The module models agentic execution as a stateful graph:
 ## How It Extends AAFLOW
 
 AAFLOW already benchmarks retrieval and text-passing agentic pipelines. This
-module adds a separate state-aware layer on top:
+module adds a separate state-aware layer:
 
 - Existing AAFLOW behavior is left unchanged.
 - `aaflow_adapter.py` optionally imports existing AAFLOW metrics and agent
   components when available.
-- `AAFLOWTextBaseline` represents AAFLOW-style text passing, while
-  `AAFLOW+` introduces explicit KV lifecycle operations.
-- If AAFLOW imports fail, the module remains usable in standalone mock mode.
+- `aaflow_text` represents AAFLOW-style text passing.
+- `AAFLOW+` represents the proposed stateful path with explicit KV lifecycle
+  operations.
+- If AAFLOW imports fail, this module still runs in standalone mock mode.
 
-## Quick Start
+## Environment Setup
 
-Set local paths in one place:
+Use `stateful_agentic_algebra/env.sh` as the single local path file. New users
+should change only these three variables for a different checkout, environment
+root, or scratch/cache location:
 
 ```bash
-# Either edit stateful_agentic_algebra/env.sh, or override before sourcing it.
-export PRJ_PATH=/path/to/AAFLOW
-export ENV_PATH=/path/to/python/envs
-export DATA_PATH=/path/to/scratch_or_data
-source stateful_agentic_algebra/env.sh
+export PRJ_PATH=/project/bi_dsc_community/drc_rag
+export ENV_PATH=/scratch/$USER/env
+export DATA_PATH=/scratch/$USER/stateful_aaflow
+source "$PRJ_PATH/stateful_agentic_algebra/env.sh"
+cd "$PRJ_PATH"
+export PYTHONPATH="$PRJ_PATH:${PYTHONPATH:-}"
 ```
 
-`env.sh` derives `PROJECT_ROOT`, `PYTHON_BIN`, `SGLANG_PYTHON_BIN`,
-`HF_HOME`, `HUGGINGFACE_HUB_CACHE`, and `TRANSFORMERS_CACHE` from those three
-variables. Slurm scripts source this file automatically when it is present.
+`SAA_BENCH_ENV=$ENV_PATH/drc_rag_bench_env` #It is an alternatives for saa_sglang_env. drc_rag_bench_env is used for my local environment. use saa_sglang_env for your local settings.
 
-From the repository root:
+`env.sh` derives:
+
+- `SAA_VLLM_ENV=$ENV_PATH/saa_vllm_env`
+- `SAA_BENCH_ENV=$ENV_PATH/drc_rag_bench_env` 
+- `PYTHON_BIN=$SAA_VLLM_ENV/bin/python`
+- `SGLANG_PYTHON_BIN=$SAA_BENCH_ENV/bin/python`
+- `PLOT_PYTHON_BIN=$SGLANG_PYTHON_BIN`
+- `HF_HOME=$DATA_PATH/huggingface`
+- `HUGGINGFACE_HUB_CACHE=$HF_HOME/hub`
+- `TRANSFORMERS_CACHE=$HF_HOME/transformers`
+
+For a clean third-party setup, create a dedicated SGLang environment named
+`saa_sglang_env` and point `SAA_BENCH_ENV` to it:
+
+```bash
+export SAA_BENCH_ENV="$ENV_PATH/saa_sglang_env"
+export SGLANG_PYTHON_BIN="$SAA_BENCH_ENV/bin/python"
+```
+
+On the current cluster account, the verified SGLang-capable environment is:
+
+```text
+/scratch/djy8hg/env/drc_rag_bench_env
+```
+
+Use `drc_rag_bench_env` for existing Slurm runs if you access to this environment, or create `saa_sglang_env` for a cleaner new install.
+
+## vLLM/HF Environment: `saa_vllm_env`
+
+Use `saa_vllm_env` for Hugging Face KV measurements and vLLM serving
+benchmarks.
+
+Create or recreate it:
+
+```bash
+cd "$PRJ_PATH"
+python3 -m venv "$ENV_PATH/saa_vllm_env"
+source "$ENV_PATH/saa_vllm_env/bin/activate"
+python -m pip install -U pip setuptools wheel
+python -m pip install -r stateful_agentic_algebra/requirements.txt
+```
+
+The requirements file is a full `pip freeze --all` snapshot of the working
+vLLM/HF stack. It is large because it includes CUDA/PyTorch/vLLM wheels. For
+mock-only runs, skip this environment and use the lightweight mock instructions
+below.
+
+Verify `saa_vllm_env`:
+
+```bash
+"$ENV_PATH/saa_vllm_env/bin/python" - <<'PY'
+import importlib.util
+
+for name in ["torch", "transformers", "vllm", "matplotlib"]:
+    print(name, "installed" if importlib.util.find_spec(name) else "missing")
+
+import torch
+print("torch_version", torch.__version__)
+print("cuda_available", torch.cuda.is_available())
+print("cuda_device_count", torch.cuda.device_count())
+PY
+```
+
+Current login-shell verification on this machine:
+
+```text
+torch: installed
+transformers: installed
+vllm: installed
+matplotlib: missing
+torch_version: 2.9.0+cu128
+cuda_available: False
+cuda_device_count: 0
+```
+
+`cuda_available=False` is expected on login shells without a GPU allocation.
+Inside an A100/H100 Slurm allocation, CUDA should be visible. Install
+`matplotlib` into `saa_vllm_env` only if you want this same interpreter to
+generate figures:
+
+```bash
+"$ENV_PATH/saa_vllm_env/bin/python" -m pip install matplotlib
+```
+
+## SGLang Environment: `saa_sglang_env`
+
+SGLang and vLLM often require different pinned CUDA/PyTorch packages. Keep
+SGLang in a separate environment.
+
+Create a clean SGLang environment:
+
+```bash
+cd "$PRJ_PATH"
+python3 -m venv "$ENV_PATH/saa_sglang_env"
+source "$ENV_PATH/saa_sglang_env/bin/activate"
+python -m pip install -U pip setuptools wheel
+python -m pip install -r stateful_agentic_algebra/slang_requirements.txt
+```
+
+Then use it with the shared path setup:
+
+```bash
+export SAA_BENCH_ENV="$ENV_PATH/saa_sglang_env"
+export SGLANG_PYTHON_BIN="$SAA_BENCH_ENV/bin/python"
+```
+
+On the current cluster account, use the existing verified SGLang environment if you have access to this directory:
+
+```bash
+export SAA_BENCH_ENV=/scratch/djy8hg/env/drc_rag_bench_env
+export SGLANG_PYTHON_BIN="$SAA_BENCH_ENV/bin/python"
+```
+
+SGLang JIT compilation needs a modern host compiler on this cluster:
+
+```bash
+module load gcc/12.4.0 cuda/12.8.0 
+export CC=$(command -v gcc)
+export CXX=$(command -v g++)
+export SGLANG_SERVER_EXTRA_ARGS='--skip-server-warmup'
+```
+
+Install gcc/12.4.0 cuda/12.8.0 if you don't have preloaded module.
+
+Verify the SGLang environment:
+
+```bash
+"$SGLANG_PYTHON_BIN" - <<'PY'
+import importlib.util
+
+for name in ["torch", "transformers", "sglang", "matplotlib"]:
+    print(name, "installed" if importlib.util.find_spec(name) else "missing")
+
+import torch
+print("torch_version", torch.__version__)
+print("cuda_available", torch.cuda.is_available())
+print("cuda_device_count", torch.cuda.device_count())
+PY
+```
+
+Current login-shell verification :
+
+```text
+torch: installed
+transformers: installed
+sglang: installed
+matplotlib: installed
+torch_version: 2.9.1+cu128
+cuda_available: False
+cuda_device_count: 0
+```
+
+Again, CUDA is expected to be unavailable on the login shell and visible inside GPU allocations.
+
+## Cache And Authentication
+
+Keep large Hugging Face downloads out of the home directory:
+
+```bash
+source "$PRJ_PATH/stateful_agentic_algebra/env.sh"
+mkdir -p "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE"
+```
+
+Without these variables, Hugging Face typically downloads models under:
+
+```text
+~/.cache/huggingface/hub/
+```
+
+Gated models require Hugging Face access approval and a token:
+
+```bash
+export HUGGINGFACE_HUB_TOKEN=<your_token>
+```
+
+Check cache usage:
+
+```bash
+du -sh "$HF_HOME" 2>/dev/null || du -sh ~/.cache/huggingface 2>/dev/null
+```
+
+## Mock LLM Tests
+
+Mock mode validates the Stateful Agentic Algebra code without downloading
+models or requiring GPUs. It uses deterministic synthetic prompts, simulated KV bytes, and the same CSV/JSON metric schema as real-model runs.
+
+Lightweight mock environment:
+
+```bash
+cd "$PRJ_PATH"
+python3 -m venv "$ENV_PATH/saa_mock_env"
+source "$ENV_PATH/saa_mock_env/bin/activate"
+python -m pip install -U pip setuptools wheel
+python -m pip install pytest pyyaml matplotlib
+export PYTHONPATH="$PRJ_PATH:${PYTHONPATH:-}"
+```
+
+Smoke test:
 
 ```bash
 python -c "import stateful_agentic_algebra; print('ok')"
 python -m stateful_agentic_algebra.smoke_test
 ```
 
-The smoke test is CPU/mock-safe and should not require GPU-only dependencies.
-It writes outputs under:
-
-```text
-runs/stateful/smoke/
-```
-
-Expected terminal message:
+Expected message:
 
 ```text
 STATEFUL AAFLOW SMOKE TEST PASSED
 ```
 
-## Mock LLM Tests
-
-Mock mode is the default path for validating the Stateful Agentic Algebra code
-without downloading models or requiring GPUs. It uses deterministic synthetic
-token counts, simulated KV bytes, and the same metric schema used by real-model
-runs.
-
-Create a light CPU/mock environment when you only need tests, mock sweeps, and
-basic CSV/JSON output:
+Small mock sweep:
 
 ```bash
-cd $PRJ_PATH
-python3 -m venv $ENV_PATH/saa_mock_env
-source $ENV_PATH/saa_mock_env/bin/activate
-python -m pip install -U pip setuptools wheel
-python -m pip install pytest pyyaml matplotlib
-export PYTHONPATH="$PWD:${PYTHONPATH:-}"
-```
-
-Or use the validated project benchmark environment from the central path file:
-
-```bash
-source stateful_agentic_algebra/env.sh
-cd "$PRJ_PATH"
-export PYTHONPATH="$PRJ_PATH:${PYTHONPATH:-}"
-```
-
-On this cluster, CUDA Python wheels may need their packaged NVIDIA libraries in
-`LD_LIBRARY_PATH`, even for import checks:
-
-```bash
-export LD_LIBRARY_PATH="$($PYTHON_BIN - <<'PY'
-import site
-from pathlib import Path
-roots = [Path(p) for p in site.getsitepackages()]
-try:
-    roots.append(Path(site.getusersitepackages()))
-except Exception:
-    pass
-print(":".join(str(p) for root in roots for p in root.glob("nvidia/*/lib") if p.is_dir()))
-PY
-):${LD_LIBRARY_PATH:-}"
-```
-
-Run the smoke test:
-
-```bash
-$PYTHON_BIN -m stateful_agentic_algebra.smoke_test
-```
-
-Run all mock baselines on a small grid:
-
-```bash
-$PYTHON_BIN -m stateful_agentic_algebra.experiment_runner \
+"$PLOT_PYTHON_BIN" -m stateful_agentic_algebra.experiment_runner \
   --all-baselines \
   --all-workloads \
   --context-grid 1024,4096 \
@@ -140,291 +282,34 @@ $PYTHON_BIN -m stateful_agentic_algebra.experiment_runner \
   --output-dir runs/stateful/mock_llm_test
 ```
 
-Expected files:
-
-```text
-runs/stateful/mock_llm_test/results.csv
-runs/stateful/mock_llm_test/results.json
-runs/stateful/mock_llm_test/config.json
-runs/stateful/mock_llm_test/skipped_baselines.json
-runs/stateful/mock_llm_test/benchmark.out
-```
-
-The main mock paper-style run used in this repository is:
-
-```bash
-$PYTHON_BIN -m stateful_agentic_algebra.experiment_runner \
-  --all-baselines \
-  --all-workloads \
-  --context-grid 1024,4096,8192 \
-  --agent-grid 2,4,8 \
-  --branch-grid 2,4 \
-  --output-tokens 64 \
-  --num-requests 5 \
-  --output-dir runs/stateful/all_baselines_mock
-```
-
 ## Config-Driven Runs
 
 Small config smoke:
 
 ```bash
-python -m stateful_agentic_algebra.experiment_runner \
+"$PLOT_PYTHON_BIN" -m stateful_agentic_algebra.experiment_runner \
   --config stateful_agentic_algebra/configs/smoke.yaml
 ```
 
 Full mock paper sweep:
 
 ```bash
-python -m stateful_agentic_algebra.experiment_runner \
+"$PLOT_PYTHON_BIN" -m stateful_agentic_algebra.experiment_runner \
   --config stateful_agentic_algebra/configs/full_paper_sweep.yaml
 ```
 
-The config files define:
-
-- `baselines`
-- `workloads`
-- `context_grid`
-- `output_grid`
-- `agent_grid`
-- `branch_grid`
-- `num_requests`
-- `backend_type`
-- `output_dir`
-
-## Real LLM Runs
-
-The current main real-LLM/vLLM benchmark environment is derived from:
-
-```bash
-source stateful_agentic_algebra/env.sh
-echo "$PYTHON_BIN"
-```
-
-`PYTHON_BIN` is the Python used by the Slurm
-scripts for Hugging Face and vLLM runs. Use `PYTHON_BIN` rather than plain
-`python` in shell commands and batch scripts so the same pinned packages are
-used everywhere.
-
-### Recreate The `saa_vllm_env` Environment
-
-The package set from `$PYTHON_BIN` was exported
-to:
+Real full-paper configs live under:
 
 ```text
-stateful_agentic_algebra/requirements.txt
+stateful_agentic_algebra/configs/paper_experiments/
 ```
 
-That file is a full `pip freeze --all` snapshot of the working vLLM/HF
-environment. It includes large CUDA 12 wheels, `torch==2.9.0`,
-`transformers==4.57.6`, and `vllm==0.11.2`. It was captured from Python
-`3.11.14` on Linux. Recreate it on a machine with enough scratch space and a
-compatible NVIDIA driver:
-
-```bash
-cd $PRJ_PATH
-
-python3 -m venv $ENV_PATH/saa_vllm_env
-source $ENV_PATH/saa_vllm_env/bin/activate
-
-python -m pip install -U pip setuptools wheel
-python -m pip install -r stateful_agentic_algebra/requirements.txt
-```
-
-If you want to reproduce the exact absolute path used by the existing Slurm
-scripts on this account:
-
-```bash
-python3 -m venv $SAA_VLLM_ENV
-source $SAA_VLLM_ENV/bin/activate
-python -m pip install -U pip setuptools wheel
-python -m pip install -r stateful_agentic_algebra/requirements.txt
-```
-
-The full requirements file is intentionally heavy. For mock-only work, use the
-light mock environment above instead of installing CUDA/vLLM packages.
-
-Validate the recreated environment:
-
-```bash
-$ENV_PATH/saa_vllm_env/bin/python - <<'PY'
-import torch
-import transformers
-import vllm
-
-print("torch", torch.__version__)
-print("transformers", transformers.__version__)
-print("vllm", vllm.__version__)
-print("cuda_available", torch.cuda.is_available())
-print("cuda_device_count", torch.cuda.device_count())
-PY
-```
-
-The current `saa_vllm_env` does not include every convenience package used by
-the plotting tests, such as `matplotlib`. Install it into this environment when
-you want one interpreter for both benchmarking and plotting:
-
-```bash
-$PYTHON_BIN -m pip install matplotlib
-```
-
-SGLang is kept in a separate environment in this repository because SGLang and
-vLLM often require different pinned CUDA/PyTorch packages. `env.sh` derives
-`SGLANG_PYTHON_BIN` from `ENV_PATH` unless you override it.
-
-### Recreate The SGLang Environment
-
-The SGLang serving environment used by the Slurm scripts is `SGLANG_PYTHON_BIN`,
-derived from `ENV_PATH` in `stateful_agentic_algebra/env.sh`.
-
-Its package set was exported to:
-
-```text
-stateful_agentic_algebra/slang_requirements.txt
-```
-
-The file is a full `pip freeze --all` snapshot of the working SGLang
-environment. It includes `sglang==0.5.10.post1`,
-`sglang-kernel==0.4.1`, `torch==2.9.1`, `transformers==5.3.0`,
-`matplotlib==3.10.8`, CUDA 12 wheels, and other benchmark dependencies. The
-current environment also contains `vllm==0.11.2`; for clean third-party
-reproduction, use this file for SGLang runs and keep the main vLLM/HF
-environment separate.
-
-Create a new SGLang environment:
-
-```bash
-cd $PRJ_PATH
-
-python3 -m venv $ENV_PATH/saa_sglang_env
-source $ENV_PATH/saa_sglang_env/bin/activate
-
-python -m pip install -U pip setuptools wheel
-python -m pip install -r stateful_agentic_algebra/slang_requirements.txt
-```
-
-If you want to reproduce the absolute path used by the existing Slurm scripts
-on this account:
-
-```bash
-python3 -m venv $SAA_BENCH_ENV
-source $SAA_BENCH_ENV/bin/activate
-python -m pip install -U pip setuptools wheel
-python -m pip install -r stateful_agentic_algebra/slang_requirements.txt
-```
-
-SGLang JIT compilation needs a modern host compiler on this cluster. Load these
-modules before launching SGLang servers:
-
-```bash
-module load gcc/12.4.0 cuda/12.8.0
-export CC=$(command -v gcc)
-export CXX=$(command -v g++)
-export SGLANG_SERVER_EXTRA_ARGS='--skip-server-warmup'
-```
-
-Set the same scratch cache variables used by HF/vLLM so model downloads do not
-fill home storage:
-
-```bash
-export HF_HOME=$DATA_PATH/huggingface
-export HUGGINGFACE_HUB_CACHE=$HF_HOME/hub
-export TRANSFORMERS_CACHE=$HF_HOME/transformers
-mkdir -p "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE"
-```
-
-Validate the recreated SGLang environment:
-
-```bash
-$ENV_PATH/saa_sglang_env/bin/python - <<'PY'
-import torch
-import transformers
-import sglang
-import matplotlib
-
-print("torch", torch.__version__)
-print("transformers", transformers.__version__)
-print("sglang", sglang.__version__)
-print("matplotlib", matplotlib.__version__)
-print("cuda_available", torch.cuda.is_available())
-print("cuda_device_count", torch.cuda.device_count())
-PY
-```
-
-Use the recreated environment with the benchmark runner:
-
-```bash
-export SGLANG_PYTHON_BIN=$ENV_PATH/saa_sglang_env/bin/python
-
-$PYTHON_BIN -m stateful_agentic_algebra.sglang_benchmark \
-  --model-id gpt2 \
-  --input-len 512 \
-  --output-len 32 \
-  --num-prompts 8 \
-  --tensor-parallel-size 1 \
-  --python-bin "$SGLANG_PYTHON_BIN" \
-  --output-dir runs/stateful/sglang_gpt2 \
-  --extra-args --skip-server-warmup
-```
-
-Recommended shell setup:
-
-```bash
-source stateful_agentic_algebra/env.sh
-cd "$PRJ_PATH"
-export PYTHONPATH="$PRJ_PATH:${PYTHONPATH:-}"
-export PYTHONNOUSERSITE=1
-```
-
-Add packaged NVIDIA wheel libraries:
-
-```bash
-export LD_LIBRARY_PATH="$($PYTHON_BIN - <<'PY'
-import site
-from pathlib import Path
-roots = [Path(p) for p in site.getsitepackages()]
-try:
-    roots.append(Path(site.getusersitepackages()))
-except Exception:
-    pass
-print(":".join(str(p) for root in roots for p in root.glob("nvidia/*/lib") if p.is_dir()))
-PY
-):${LD_LIBRARY_PATH:-}"
-```
-
-Verify imports:
-
-```bash
-$PYTHON_BIN - <<'PY'
-import importlib
-for name in ["torch", "transformers", "vllm", "sglang"]:
-    try:
-        mod = importlib.import_module(name)
-        print(name, "ok", getattr(mod, "__version__", "unknown"))
-    except Exception as exc:
-        print(name, "failed", type(exc).__name__, exc)
-PY
-```
-
-Refresh the vLLM/HF environment from the pinned requirements only from a
-GPU/login shell where large wheel downloads are acceptable:
-
-```bash
-$PYTHON_BIN -m pip install -U pip setuptools wheel
-$PYTHON_BIN -m pip install -r stateful_agentic_algebra/requirements.txt
-```
-
-Do not install SGLang into this vLLM environment unless you intentionally want
-to resolve a combined stack yourself. SGLang and vLLM can require different
-pinned versions of `torch`, `transformers`, FlashInfer, and related CUDA
-packages. For production real-LLM serving sweeps, separate vLLM-only and
-SGLang-only environments are cleaner. The mock experiments do not depend on
-either package importing successfully.
+## Real LLM Benchmarks
 
 Hugging Face KV microbenchmark:
 
 ```bash
-$PYTHON_BIN -m stateful_agentic_algebra.hf_kv_backend \
+"$PYTHON_BIN" -m stateful_agentic_algebra.hf_kv_backend \
   --model-id gpt2 \
   --context-tokens 512 \
   --output-tokens 32 \
@@ -435,7 +320,7 @@ $PYTHON_BIN -m stateful_agentic_algebra.hf_kv_backend \
 vLLM serving benchmark:
 
 ```bash
-$PYTHON_BIN -m stateful_agentic_algebra.vllm_benchmark \
+"$PYTHON_BIN" -m stateful_agentic_algebra.vllm_benchmark \
   --model-id meta-llama/Meta-Llama-3-8B-Instruct \
   --input-len 4096 \
   --output-len 128 \
@@ -448,94 +333,56 @@ $PYTHON_BIN -m stateful_agentic_algebra.vllm_benchmark \
 SGLang serving benchmark:
 
 ```bash
-source stateful_agentic_algebra/env.sh
-$PYTHON_BIN -m stateful_agentic_algebra.sglang_benchmark \
+"$PYTHON_BIN" -m stateful_agentic_algebra.sglang_benchmark \
   --model-id gpt2 \
   --input-len 512 \
   --output-len 32 \
   --num-prompts 8 \
   --tensor-parallel-size 1 \
   --python-bin "$SGLANG_PYTHON_BIN" \
-  --output-dir runs/stateful/sglang_gpt2
+  --output-dir runs/stateful/sglang_gpt2 \
+  --extra-args --skip-server-warmup
 ```
 
-SGLang and vLLM often need different pinned Python packages. Keep using
-`PYTHON_BIN` for the main runner and set `SGLANG_PYTHON_BIN` when SGLang is
-installed in a separate environment.
-
-Multi-model sweep:
+Multi-model runner:
 
 ```bash
-$PYTHON_BIN -m stateful_agentic_algebra.multi_llm_runner \
+"$PYTHON_BIN" -m stateful_agentic_algebra.multi_llm_runner \
   --config stateful_agentic_algebra/configs/real_llm_full_paper.yaml
 ```
 
-Slurm multi-model sweep:
+## Slurm Runs
+
+The Slurm scripts source `stateful_agentic_algebra/env.sh` and honor
+`PYTHON_BIN`, `SGLANG_PYTHON_BIN`, `HF_HOME`, and cache variables.
+
+Single backend/model sweep:
 
 ```bash
-export MODEL_ID='gpt2'
+export MODEL_ID='mistralai/Mistral-7B-Instruct-v0.3'
 export BACKEND='hf'
-export CONTEXT_GRID='512'
+export CONTEXT_GRID='1024,4096,8192'
 export OUTPUT_GRID='64'
 export NUM_PROMPTS='4'
-sbatch -p gpu --gres=gpu:a100:1 --export=ALL \
+export TENSOR_PARALLEL_SIZE='2'
+export OUTPUT_DIR='runs/stateful/manual_hf_mistral'
+
+sbatch --partition=bii-gpu --reservation=bi_fox_dgx --export=ALL \
   stateful_agentic_algebra/slurm/run_real_llm_sweep.sbatch
 ```
 
-For comma-separated grids, always export variables first so Slurm does not split
-`--export` values on commas:
+For comma-separated grids, export variables first and use `--export=ALL`; do
+not put comma-separated values directly inside `sbatch --export=...`.
 
-```bash
-export MODEL_ID='gpt2,mistralai/Mistral-7B-Instruct-v0.3'
-export BACKEND='hf,vllm,sglang'
-export CONTEXT_GRID='512,960'
-export OUTPUT_GRID='64'
-export NUM_PROMPTS='8'
-sbatch -p gpu --gres=gpu:a100:1 --export=ALL \
-  stateful_agentic_algebra/slurm/run_real_llm_sweep.sbatch
-```
-
-For SGLang on this cluster, use A100/H100 nodes. V100 nodes are below
-SGLang's current minimum compute capability, and SGLang's JIT kernels need a
-newer host compiler. The sweep script loads `gcc/12.4.0` and `cuda/12.8.0` by
-default. It uses `--skip-server-warmup` to avoid long-context readiness
-timeouts while keeping CUDA graph and overlap scheduling enabled.
-
-Gated Hugging Face models require access approval and:
-
-```bash
-export HUGGINGFACE_HUB_TOKEN=<your_token>
-```
-
-Large model weights should be cached on scratch or another high-capacity
-filesystem instead of the default home-directory cache. Set these variables in
-the same shell before running HF or vLLM benchmarks:
-
-```bash
-export HF_HOME=$DATA_PATH/huggingface
-export HUGGINGFACE_HUB_CACHE=$DATA_PATH/huggingface/hub
-export TRANSFORMERS_CACHE=$DATA_PATH/huggingface/transformers
-mkdir -p "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE"
-```
-
-Without these variables, Hugging Face typically downloads models under:
-
-```text
-~/.cache/huggingface/hub/
-```
-
-Check current cache usage with:
-
-```bash
-du -sh "$HF_HOME" 2>/dev/null || du -sh ~/.cache/huggingface 2>/dev/null
-```
+For SGLang on this cluster, use A100/H100 nodes. V100 nodes are below SGLang's
+current minimum compute capability.
 
 ## Plot Generation
 
-Mock/synthetic paper plots:
+Mock/synthetic plots:
 
 ```bash
-python -m stateful_agentic_algebra.plots \
+"$PLOT_PYTHON_BIN" -m stateful_agentic_algebra.plots \
   --results runs/stateful/full_paper_sweep/results.csv \
   --output-dir runs/stateful/full_paper_sweep/figures
 ```
@@ -543,40 +390,42 @@ python -m stateful_agentic_algebra.plots \
 Real LLM plots:
 
 ```bash
-python -m stateful_agentic_algebra.plots \
+"$PLOT_PYTHON_BIN" -m stateful_agentic_algebra.plots \
   --results runs/stateful/real_llm_full/results.csv \
   --output-dir runs/stateful/real_llm_full/figures \
   --real-llm
 ```
 
-Synthetic plots are saved as SVG, PNG, and PDF. Real LLM plots are saved as PNG
-and PDF.
+Generate only selected real-LLM plots:
+
+```bash
+"$PLOT_PYTHON_BIN" -m stateful_agentic_algebra.plots \
+  --results runs/stateful/full_paper/exp2_multi_agent_scaling_mistral_hf/results.csv \
+  --output-dir runs/stateful/full_paper/exp2_multi_agent_scaling_mistral_hf/figures \
+  --real-llm \
+  --plot-names real_speedup_vs_agents
+```
+
+Figures are saved as PNG, PDF, and SVG.
 
 ## Baselines
 
-- `AAFLOW+`: the proposed Stateful Agentic Algebra runtime with explicit
-  KV materialize, transfer, fork, merge, and evict operations.
-- `dense_prefill`: synthetic dense prefill/text-passing baseline where every
-  agent independently pays context prefill and has no KV reuse.
-- `aaflow_text`: optional AAFLOW text baseline that reuses AAFLOW RagAgent or
-  LLM generator paths when importable; otherwise it falls back or skips.
-- `vllm_local_prefix`: optional vLLM/local-prefix baseline. If vLLM is missing,
-  it is skipped or simulated depending on the runner path.
-- `sglang_prefix`: optional SGLang prefix baseline. If SGLang is installed, it
-  is labeled as SGLang-backed; if not, the runner emits simulated SGLang-prefix
-  metrics with a clear reason instead of dropping all rows.
-- `kvcomm_prefix`: KVCOMM-style anchor-based cross-context KV reuse baseline
-  based on the FastMAS/KVCOMM implementation. If `KVCOMM_REPO` points to a
-  checkout, metadata records that availability; otherwise full-paper sweeps use
-  a measured-profile simulation with anchor matching, offset approximation, and
-  anchor-prediction overhead.
-- `distserve_style`: simulated disaggregated prefill/decode baseline. It is
-  labeled as DistServe-style simulation, not an exact DistServe implementation.
+- `AAFLOW+`: proposed Stateful Agentic Algebra runtime with explicit KV
+  materialize, transfer, fork, merge, and evict operations.
+- `dense_prefill`: text-passing baseline where every agent independently pays
+  context prefill and has no KV reuse.
+- `aaflow_text`: optional AAFLOW text baseline using AAFLOW imports when
+  available.
+- `vllm_local_prefix`: optional vLLM/local-prefix reuse baseline.
+- `sglang_prefix`: optional SGLang prefix reuse baseline.
+- `kvcomm_prefix`: KVCOMM-style anchor-based cross-context KV reuse baseline.
+- `distserve_style`: simulated disaggregated prefill/decode baseline, not an
+  exact DistServe implementation.
 
-List available baselines:
+List baselines:
 
 ```bash
-python -m stateful_agentic_algebra.experiment_runner --list-baselines
+"$PLOT_PYTHON_BIN" -m stateful_agentic_algebra.experiment_runner --list-baselines
 ```
 
 ## Metrics
@@ -584,7 +433,7 @@ python -m stateful_agentic_algebra.experiment_runner --list-baselines
 All experiment rows use a common schema:
 
 - `ttft_sec`: time to first token.
-- `total_latency_sec`: end-to-end latency for the run.
+- `total_latency_sec`: end-to-end latency.
 - `prefill_sec`: context prefill or recomputation cost.
 - `decode_sec`: decode cost for generated tokens.
 - `transfer_sec`: simulated or measured KV transfer time.
@@ -619,6 +468,8 @@ Experiment runner:
 - `results.csv`
 - `config.json`
 - `skipped_baselines.json`
+- `benchmark.out`
+- `summary.out`
 
 Real model tools:
 
@@ -635,26 +486,25 @@ Plotting:
 
 - `figures/*.png`
 - `figures/*.pdf`
-- `figures/*.svg` for synthetic plots
+- `figures/*.svg`
 
-## Troubleshooting Optional Dependencies
+## Troubleshooting
 
 - Missing vLLM: vLLM benchmarks are skipped unless `--require-vllm` is used.
 - Missing SGLang: `sglang_prefix` falls back to simulated prefix metrics, and
   the real `sglang` backend is skipped unless SGLang is available through
-  `SGLANG_PYTHON_BIN` or the active Python environment.
+  `SGLANG_PYTHON_BIN`.
 - Missing KVCOMM checkout: `kvcomm_prefix` still runs as a measured-profile
-  baseline. Set `KVCOMM_REPO=/path/to/KVCOMM` to record an external KVCOMM
-  checkout in metadata.
-- Missing Hugging Face packages: mock mode still works; install
-  `transformers`, `torch`, and `huggingface_hub` for HF runs.
+  simulation. Set `KVCOMM_REPO=/path/to/KVCOMM` to record an external checkout.
 - Gated model access: request access on Hugging Face and export
   `HUGGINGFACE_HUB_TOKEN`.
 - Hugging Face cache fills home storage: set `HF_HOME`,
-  `HUGGINGFACE_HUB_CACHE`, and `TRANSFORMERS_CACHE` to a scratch path before
+  `HUGGINGFACE_HUB_CACHE`, and `TRANSFORMERS_CACHE` to scratch before
   downloading large models.
 - CUDA OOM: reduce context length/output length/request count, use a smaller
   model, or increase tensor parallelism.
+- CUDA not visible on login shell: run inside a Slurm GPU allocation and check
+  `nvidia-smi`.
 - UCX/NCCL unavailable: transport falls back to mock/local simulation.
 - Unsupported vLLM KV export: the wrapper raises `NotImplementedError` for
   unstable KV export/import APIs rather than failing at import time.
