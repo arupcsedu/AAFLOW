@@ -297,7 +297,8 @@ def _plot_real_speedup_vs_agents(plt: Any, rows: list[dict[str, Any]], stem: Pat
         "Number of Agents",
         "Speedup (baseline / AAFLOW+)",
         "Speedup vs Number of Agents",
-        legend_loc="center right",
+        legend_loc="center left",
+        legend_bbox=(1.02, 0.5),
     )
     return _save_png_pdf(plt, fig, stem)
 
@@ -527,6 +528,7 @@ def _finish_real_xy(
     ylabel: str,
     title: str,
     legend_loc: str = "best",
+    legend_bbox: tuple[float, float] | None = None,
 ) -> None:
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
@@ -534,7 +536,10 @@ def _finish_real_xy(
     _style_axis(ax)
     handles, labels = ax.get_legend_handles_labels()
     if handles:
-        ax.legend(frameon=False, loc=legend_loc)
+        legend_kwargs = {"frameon": False, "loc": legend_loc}
+        if legend_bbox is not None:
+            legend_kwargs["bbox_to_anchor"] = legend_bbox
+        ax.legend(**legend_kwargs)
     if not grouped:
         _annotate_no_data(ax)
     ax.figure.tight_layout()
