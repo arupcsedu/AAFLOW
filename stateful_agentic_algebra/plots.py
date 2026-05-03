@@ -291,35 +291,68 @@ def _plot_real_speedup_vs_agents(plt: Any, rows: list[dict[str, Any]], stem: Pat
     fig, ax = _figure(plt)
     grouped = _real_speedup_by_x(rows, x_key="num_agents", metric_key="total_latency_sec")
     _plot_lines(ax, grouped)
-    _finish_real_xy(ax, grouped, "Number of Agents", "Speedup (baseline / AAFLOW+)", "Speedup vs Number of Agents")
+    _finish_real_xy(
+        ax,
+        grouped,
+        "Number of Agents",
+        "Speedup (baseline / AAFLOW+)",
+        "Speedup vs Number of Agents",
+        legend_loc="center right",
+    )
     return _save_png_pdf(plt, fig, stem)
 
 
 def _plot_real_transfer_recompute_crossover(plt: Any, rows: list[dict[str, Any]], stem: Path) -> list[Path]:
     fig, ax = _figure(plt)
     if any(row.get("bandwidth_name") for row in rows):
+        crossover_rows = [row for row in rows if row.get("bandwidth_name")]
+        latency_rows = [row for row in crossover_rows if row.get("latency_name")]
+        rdma_rows = [row for row in latency_rows if "rdma" in str(row.get("latency_name") or "").lower()]
+        if rdma_rows:
+            crossover_rows = rdma_rows
+
         transfer = _group_xy_with_label(
-            rows,
+            crossover_rows,
             x_key="context_tokens",
             y_key="t_transfer_sec",
-            label_keys=("model_id", "bandwidth_name"),
-            separator=" / ",
+            label_keys=("bandwidth_name",),
+            separator=" ",
         )
-        recompute = _group_xy(rows, x_key="context_tokens", y_key="t_recompute_sec", series_key="model_id")
+        transfer = {f"AAFLOW+ transfer @ {label}": points for label, points in transfer.items()}
+
+        model_ids = sorted({str(row.get("model_id") or "unknown") for row in crossover_rows})
+        recompute_by_model = _group_xy(crossover_rows, x_key="context_tokens", y_key="t_recompute_sec", series_key="model_id")
+        local_by_model = _group_xy(crossover_rows, x_key="context_tokens", y_key="t_local_reuse_sec", series_key="model_id")
+        if len(model_ids) <= 1:
+            recompute = {"Dense/text recompute": next(iter(recompute_by_model.values()), [])}
+            local_reuse = {"Local-prefix reuse (vLLM/SGLang/KVCOMM)": next(iter(local_by_model.values()), [])}
+        else:
+            recompute = {
+                f"{_short_label(label)} dense/text recompute": points
+                for label, points in recompute_by_model.items()
+            }
+            local_reuse = {
+                f"{_short_label(label)} local-prefix reuse": points
+                for label, points in local_by_model.items()
+            }
     else:
         baseline_rows = _real_baseline_rows(rows)
         transfer = _group_xy(baseline_rows, x_key="context_tokens", y_key="transfer_sec", series_key="baseline")
         recompute = _group_xy(baseline_rows, x_key="context_tokens", y_key="dense_prefill_sec", series_key="baseline")
+        local_reuse = {}
 
     colors = _palette(max(1, len(transfer)))
     for idx, (label, points) in enumerate(transfer.items()):
         x, y = _sorted_points(points)
-        ax.plot(x, y, marker="o", linewidth=1.8, color=colors[idx % len(colors)], label=f"{label} transfer")
+        ax.plot(x, y, marker="o", linewidth=1.8, color=colors[idx % len(colors)], label=label)
     for label, points in recompute.items():
         x, y = _sorted_points(points)
-        ax.plot(x, y, marker="s", linestyle="--", linewidth=1.8, label=f"{label} recompute")
-    grouped = {**transfer, **{f"{key} recompute": value for key, value in recompute.items()}}
-    _finish_real_xy(ax, grouped, "Context Length (tokens)", "Time (s)", "Transfer/Recompute Crossover by Model and Bandwidth")
+        ax.plot(x, y, marker="s", linestyle="--", linewidth=1.8, label=label)
+    for label, points in local_reuse.items():
+        x, y = _sorted_points(points)
+        ax.plot(x, y, marker="^", linestyle=":", linewidth=1.8, label=label)
+    grouped = {**transfer, **recompute, **local_reuse}
+    _finish_real_xy(ax, grouped, "Context Length (tokens)", "Time (s)", "Transfer/Recompute Crossover by Baseline Policy")
     return _save_png_pdf(plt, fig, stem)
 
 
@@ -493,6 +526,7 @@ def _finish_real_xy(
     xlabel: str,
     ylabel: str,
     title: str,
+    legend_loc: str = "best",
 ) -> None:
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
@@ -500,7 +534,7 @@ def _finish_real_xy(
     _style_axis(ax)
     handles, labels = ax.get_legend_handles_labels()
     if handles:
-        ax.legend(frameon=False, loc="best")
+        ax.legend(frameon=False, loc=legend_loc)
     if not grouped:
         _annotate_no_data(ax)
     ax.figure.tight_layout()

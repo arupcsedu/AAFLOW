@@ -104,14 +104,22 @@ def launch_sglang_server(
         raise
 
 
-def find_available_port(start_port: int, attempts: int = 200) -> int:
-    """Return the first locally bindable TCP port at or above ``start_port``."""
+def find_available_port(start_port: int, attempts: int = 200, excluded: Optional[set[int]] = None) -> int:
+    """Return the first locally bindable TCP port at or above ``start_port``.
+
+    SGLang starts slowly enough that stale or concurrently-starting servers can
+    race with a simple preflight check.  The check therefore avoids
+    ``SO_REUSEADDR`` and verifies both bindability and connectability.
+    """
 
     base = max(1, int(start_port))
+    blocked = excluded or set()
     for offset in range(max(1, int(attempts))):
         port = base + offset
         if port > 65535:
             break
+        if port in blocked:
+            continue
         if _port_is_available(port):
             return port
     raise RuntimeError(f"no free localhost port found in range {base}-{min(65535, base + attempts - 1)}")
@@ -130,6 +138,15 @@ def wait_for_server(port: int, timeout_sec: float = 600.0, poll_interval_sec: fl
             try:
                 with urlopen(url, timeout=2.0) as response:
                     if 200 <= int(response.status) < 300:
+                        time.sleep(1.0)
+                        if process.poll() is not None:
+                            raise RuntimeError(
+                                f"SGLang server exited after health check on port {port} "
+                                f"with code {process.returncode}: {_tail_file(stderr_path)}"
+                            )
+                        stderr_text = _tail_file(stderr_path, max_bytes=4096, start_at=last_stderr_size)
+                        if "address already in use" in stderr_text.lower() or "error while attempting to bind" in stderr_text.lower():
+                            raise RuntimeError(f"SGLang server failed to bind port {port}: {_tail_file(stderr_path)}")
                         return True
             except (HTTPError, URLError, TimeoutError, OSError, socket.timeout):
                 pass
@@ -330,29 +347,47 @@ def run_cli(args: argparse.Namespace) -> int:
 
     server: Optional[subprocess.Popen[Any]] = None
     try:
-        actual_port = find_available_port(args.port)
-        if actual_port != int(args.port):
-            print(f"SGLang port {args.port} is busy; using free port {actual_port}", file=sys.stderr)
+        actual_port = int(args.port)
+        attempted_ports: set[int] = set()
+        last_error: Exception | None = None
+        for launch_attempt in range(4):
+            if server is not None:
+                previous_port = actual_port
+                terminate_process_tree(server)
+                wait_for_port_release(previous_port)
+                server = None
+            actual_port = find_available_port(int(args.port) + launch_attempt * 251, excluded=attempted_ports)
+            attempted_ports.add(actual_port)
+            if actual_port != int(args.port):
+                print(f"SGLang port {args.port} is busy; using free port {actual_port}", file=sys.stderr)
             config["requested_port"] = args.port
             config["port"] = actual_port
             (output_dir / "config.json").write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
-        server = launch_sglang_server(
-            model_id=args.model_id,
-            tensor_parallel_size=args.tensor_parallel_size,
-            port=actual_port,
-            extra_args=args.extra_args,
-            stdout_path=output_dir / "sglang_stdout.log",
-            stderr_path=output_dir / "sglang_stderr.log",
-            python_bin=args.python_bin,
-        )
-        ready = wait_for_launched_server(
-            actual_port,
-            server,
-            timeout_sec=args.server_timeout_sec,
-            stderr_path=output_dir / "sglang_stderr.log",
-        )
-        if not ready:
-            raise RuntimeError(f"SGLang server did not become ready on port {actual_port}")
+            try:
+                server = launch_sglang_server(
+                    model_id=args.model_id,
+                    tensor_parallel_size=args.tensor_parallel_size,
+                    port=actual_port,
+                    extra_args=args.extra_args,
+                    stdout_path=output_dir / "sglang_stdout.log",
+                    stderr_path=output_dir / "sglang_stderr.log",
+                    python_bin=args.python_bin,
+                )
+                ready = wait_for_launched_server(
+                    actual_port,
+                    server,
+                    timeout_sec=args.server_timeout_sec,
+                    stderr_path=output_dir / "sglang_stderr.log",
+                )
+                if not ready:
+                    raise RuntimeError(f"SGLang server did not become ready on port {actual_port}")
+                break
+            except Exception as exc:
+                last_error = exc
+                if "bind" not in str(exc).lower() and "address already in use" not in str(exc).lower():
+                    raise
+        else:
+            raise RuntimeError(f"SGLang server failed after port retries: {last_error}")
         metrics = run_sglang_bench_serve(
             model_id=args.model_id,
             input_len=args.input_len,
@@ -376,6 +411,7 @@ def run_cli(args: argparse.Namespace) -> int:
     finally:
         if server is not None:
             terminate_process_tree(server)
+            wait_for_port_release(actual_port)
 
 
 def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
@@ -403,8 +439,9 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
 def terminate_process_tree(process: subprocess.Popen[Any], timeout_sec: float = 30.0) -> None:
     """Terminate a server process group."""
 
-    if process.poll() is not None:
-        return
+    # SGLang can leave worker children alive after the launch parent has
+    # already exited, especially after late uvicorn bind failures. Always try
+    # to signal the process group instead of returning early on a polled parent.
     try:
         if hasattr(os, "killpg"):
             os.killpg(os.getpgid(process.pid), signal.SIGTERM)
@@ -421,11 +458,26 @@ def terminate_process_tree(process: subprocess.Popen[Any], timeout_sec: float = 
             pass
 
 
+def wait_for_port_release(port: int, timeout_sec: float = 20.0, poll_interval_sec: float = 0.5) -> bool:
+    """Wait until localhost ``port`` can be bound by a new server."""
+
+    deadline = time.time() + float(timeout_sec)
+    while time.time() < deadline:
+        if _port_is_available(int(port)):
+            return True
+        time.sleep(float(poll_interval_sec))
+    return _port_is_available(int(port))
+
+
 def _port_is_available(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.settimeout(0.2)
+        if probe.connect_ex(("127.0.0.1", int(port))) == 0:
+            return False
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind(("127.0.0.1", int(port)))
+            sock.listen(1)
         except OSError:
             return False
     return True

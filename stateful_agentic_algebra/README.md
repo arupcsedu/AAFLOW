@@ -320,7 +320,7 @@ modules before launching SGLang servers:
 module load gcc/12.4.0 cuda/12.8.0
 export CC=$(command -v gcc)
 export CXX=$(command -v g++)
-export SGLANG_SERVER_EXTRA_ARGS='--disable-overlap-schedule --disable-cuda-graph --skip-server-warmup'
+export SGLANG_SERVER_EXTRA_ARGS='--skip-server-warmup'
 ```
 
 Set the same scratch cache variables used by HF/vLLM so model downloads do not
@@ -364,7 +364,7 @@ $PYTHON_BIN -m stateful_agentic_algebra.sglang_benchmark \
   --tensor-parallel-size 1 \
   --python-bin "$SGLANG_PYTHON_BIN" \
   --output-dir runs/stateful/sglang_gpt2 \
-  --extra-args --disable-overlap-schedule --disable-cuda-graph
+  --extra-args --skip-server-warmup
 ```
 
 Recommended shell setup:
@@ -495,11 +495,11 @@ sbatch -p gpu --gres=gpu:a100:1 --export=ALL \
   stateful_agentic_algebra/slurm/run_real_llm_sweep.sbatch
 ```
 
-For SGLang on this cluster, use the A100 `gpu` partition. V100 nodes are below
+For SGLang on this cluster, use A100/H100 nodes. V100 nodes are below
 SGLang's current minimum compute capability, and SGLang's JIT kernels need a
 newer host compiler. The sweep script loads `gcc/12.4.0` and `cuda/12.8.0` by
-default and passes `--disable-overlap-schedule --disable-cuda-graph` to avoid
-the JIT paths that fail under the system GCC 8 toolchain.
+default. It uses `--skip-server-warmup` to avoid long-context readiness
+timeouts while keeping CUDA graph and overlap scheduling enabled.
 
 Gated Hugging Face models require access approval and:
 

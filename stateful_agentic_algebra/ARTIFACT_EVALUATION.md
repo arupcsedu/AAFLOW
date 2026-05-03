@@ -75,7 +75,7 @@ starting the server. Without GCC 12, SGLang JIT compilation can fail with
 module load gcc/12.4.0 cuda/12.8.0
 export CC=$(command -v gcc)
 export CXX=$(command -v g++)
-export SGLANG_SERVER_EXTRA_ARGS='--disable-overlap-schedule --disable-cuda-graph --skip-server-warmup'
+export SGLANG_SERVER_EXTRA_ARGS='--skip-server-warmup'
 ```
 
 ## Smoke Test
@@ -301,7 +301,7 @@ cluster, use the SGLang env and server flags from the installation section:
 
 ```bash
 source stateful_agentic_algebra/env.sh
-export SGLANG_SERVER_EXTRA_ARGS='--disable-overlap-schedule --disable-cuda-graph --skip-server-warmup'
+export SGLANG_SERVER_EXTRA_ARGS='--skip-server-warmup'
 ```
 
 If SGLang's packaged `bench_serving` command fails because optional benchmark

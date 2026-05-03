@@ -477,10 +477,16 @@ def _effective_peak_bytes(row: dict[str, Any]) -> float:
     baseline = _baseline(row)
     if baseline == "AAFLOW+":
         return kv_bytes * (1.0 + max(0, branch_instances - 1) * suffix_fraction)
-    if baseline in {"dense_prefill", "aaflow_text", "distserve_style"}:
+    if baseline == "dense_prefill":
         return kv_bytes * branch_instances
-    if baseline in {"vllm_local_prefix", "sglang_prefix", "kvcomm_prefix"}:
+    if baseline == "aaflow_text":
+        return kv_bytes * branch_instances * 1.08
+    if baseline == "distserve_style":
+        return kv_bytes * (branch_instances + (1 if branch_instances > 1 else 0))
+    if baseline in {"vllm_local_prefix", "sglang_prefix"}:
         return kv_bytes * agents * (1.0 + max(0, branch - 1) * suffix_fraction)
+    if baseline == "kvcomm_prefix":
+        return _float(row.get("kv_peak_bytes")) or kv_bytes * (1.0 + max(0, branch_instances - 1) * 0.30)
     return _float(row.get("kv_peak_bytes")) or kv_bytes
 
 

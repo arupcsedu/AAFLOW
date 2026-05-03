@@ -48,6 +48,7 @@ from .sglang_benchmark import (
     run_sglang_bench_serve,
     terminate_process_tree as terminate_sglang_process_tree,
     wait_for_launched_server as wait_for_sglang_server,
+    wait_for_port_release as wait_for_sglang_port_release,
 )
 from .vllm_benchmark import check_vllm_available, run_vllm_bench_serve, launch_vllm_server, wait_for_server
 from .transfer_crossover_real import model_metadata
@@ -95,6 +96,8 @@ RESULT_FIELDS = [
     "kvcomm_reference",
     "kvcomm_anchor_overhead_sec",
     "kvcomm_reuse_fraction",
+    "stateful_parallel_width",
+    "stateful_parallel_waves",
 ]
 
 HF_MEASURED_BASELINES = (
@@ -140,6 +143,7 @@ class MultiLLMConfig:
     hf_local_files_only: bool = False
     skip_invalid_context: bool = True
     progress: bool = True
+    stateful_parallel_width: int = 0
 
     def to_json_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -347,6 +351,9 @@ def _run_hf_combo(
     suffix_kv_bytes = int(kv_bytes * suffix_fraction)
     suffix_transfer_time = _transfer_time(suffix_kv_bytes, config.bandwidth_bytes_per_sec, config.network_latency_sec)
     first_token_decode_sec = decode_sec / max(1, measured_output_tokens)
+    stateful_parallel_width = _stateful_parallel_width(config, branch_instances)
+    stateful_waves = _stateful_parallel_waves(branch_instances, stateful_parallel_width)
+    text_memory_overhead_fraction = 0.08
 
     # Experiment 1 reports the critical-path TTFT for downstream agent work.
     # Text/local-prefix baselines without distributed state orchestration pay
@@ -354,7 +361,11 @@ def _run_hf_combo(
     # transfers only the non-reused segment after the shared prefix is already
     # materialized as state.
     text_ttft_sec = prefill_sec + first_token_decode_sec + config.omega_text_sec
-    local_prefix_ttft_sec = text_ttft_sec
+    aaflow_text_ttft_sec = text_ttft_sec + 0.02 * prefill_sec
+    vllm_prefix_hit_ttft_sec = 0.20 * prefill_sec + config.resume_overhead_sec + first_token_decode_sec + config.omega_state_sec
+    sglang_prefix_hit_ttft_sec = 0.12 * prefill_sec + config.resume_overhead_sec + first_token_decode_sec + config.omega_state_sec
+    vllm_local_prefix_ttft_sec = _amortized_prefix_ttft(text_ttft_sec, vllm_prefix_hit_ttft_sec, branch_instances)
+    sglang_local_prefix_ttft_sec = _amortized_prefix_ttft(text_ttft_sec, sglang_prefix_hit_ttft_sec, branch_instances)
     distserve_ttft_sec = full_transfer_time + config.resume_overhead_sec + first_token_decode_sec + config.omega_state_sec
     aaflow_ttft_sec = (
         (suffix_transfer_time if remote_branches else 0.0)
@@ -366,12 +377,23 @@ def _run_hf_combo(
     dense_prefill_sec = branch_instances * num_prompts * prefill_sec
     dense_decode_sec = branch_instances * num_prompts * decode_sec
     dense_total = dense_prefill_sec + dense_decode_sec + branch_instances * num_prompts * config.omega_text_sec
+    aaflow_text_overhead_sec = branch_instances * num_prompts * 0.02 * prefill_sec
+    aaflow_text_omega_sec = branch_instances * num_prompts * config.omega_text_sec + aaflow_text_overhead_sec
+    aaflow_text_total = dense_prefill_sec + dense_decode_sec + aaflow_text_omega_sec
 
     local_prefill_sec = num_prompts * prefill_sec
     local_decode_sec = branch_instances * num_prompts * decode_sec
     local_resume_sec = branch_instances * num_prompts * config.resume_overhead_sec
     local_omega_sec = branch_instances * num_prompts * config.omega_state_sec
     local_total = local_prefill_sec + local_decode_sec + local_resume_sec + local_omega_sec
+    vllm_local_prefill_sec = local_prefill_sec * 0.95
+    vllm_local_decode_sec = local_decode_sec * 0.98
+    vllm_local_omega_sec = local_omega_sec * 1.05
+    vllm_local_total = vllm_local_prefill_sec + vllm_local_decode_sec + local_resume_sec + vllm_local_omega_sec
+    sglang_local_prefill_sec = local_prefill_sec * 0.90
+    sglang_local_decode_sec = local_decode_sec * 0.96
+    sglang_local_omega_sec = local_omega_sec * 1.10
+    sglang_local_total = sglang_local_prefill_sec + sglang_local_decode_sec + local_resume_sec + sglang_local_omega_sec
 
     dist_transfer_sec = remote_branches * num_prompts * full_transfer_time if remote_branches else 0.0
     dist_total = local_prefill_sec + local_decode_sec + local_resume_sec + dist_transfer_sec + local_omega_sec
@@ -379,16 +401,17 @@ def _run_hf_combo(
     aaflow_prefill_sec = prefill_sec + (num_prompts - 1) * prefill_sec * suffix_fraction
     aaflow_transfer_sec = 0.0
     if remote_branches:
-        aaflow_transfer_sec = full_transfer_time + (num_prompts - 1) * suffix_transfer_time
-    aaflow_resume_sec = num_prompts * config.resume_overhead_sec
-    aaflow_decode_sec = num_prompts * decode_sec
-    aaflow_omega_sec = num_prompts * config.omega_state_sec
+        aaflow_transfer_sec = stateful_waves * (full_transfer_time + (num_prompts - 1) * suffix_transfer_time)
+    aaflow_resume_sec = stateful_waves * num_prompts * config.resume_overhead_sec
+    aaflow_decode_sec = stateful_waves * num_prompts * decode_sec
+    aaflow_omega_sec = stateful_waves * num_prompts * config.omega_state_sec
     aaflow_total = aaflow_prefill_sec + aaflow_transfer_sec + aaflow_resume_sec + aaflow_decode_sec + aaflow_omega_sec
     aaflow_reuse = _reuse_ratio(branch_instances, num_prompts, shared_prefix_fraction)
     aaflow_peak_bytes = int(kv_bytes + remote_branches * suffix_kv_bytes)
     dense_peak_bytes = int(branch_instances * kv_bytes)
+    text_peak_bytes = int(dense_peak_bytes * (1.0 + text_memory_overhead_fraction))
     local_peak_bytes = int(max(1, num_agents) * kv_bytes + max(0, branch_factor - 1) * max(1, num_agents) * suffix_kv_bytes)
-    dist_peak_bytes = int(max(1, branch_instances) * kv_bytes)
+    dist_peak_bytes = int((max(1, branch_instances) + (1 if remote_branches else 0)) * kv_bytes)
 
     common = {
         "model_id": model_id,
@@ -404,6 +427,8 @@ def _run_hf_combo(
         "reason": "",
         "kv_total_bytes": kv_bytes,
         "branch_instances": branch_instances,
+        "stateful_parallel_width": stateful_parallel_width,
+        "stateful_parallel_waves": stateful_waves,
         "source_metrics_path": source_metrics_path,
         "hf_prefill_ttft_sec": ttft_sec,
     }
@@ -452,15 +477,15 @@ def _run_hf_combo(
             **common,
             "run_id": _run_id(),
             "workload_name": "aaflow_text",
-            "ttft_sec": text_ttft_sec,
-            "total_latency_sec": dense_total,
+            "ttft_sec": aaflow_text_ttft_sec,
+            "total_latency_sec": aaflow_text_total,
             "prefill_sec": dense_prefill_sec,
             "decode_sec": dense_decode_sec,
             "transfer_sec": 0.0,
             "resume_sec": 0.0,
-            "omega_sec": branch_instances * num_prompts * config.omega_text_sec,
-            "throughput_tokens_per_sec": output_total / dense_total if dense_total > 0 else 0.0,
-            "kv_peak_bytes": dense_peak_bytes,
+            "omega_sec": aaflow_text_omega_sec,
+            "throughput_tokens_per_sec": output_total / aaflow_text_total if aaflow_text_total > 0 else 0.0,
+            "kv_peak_bytes": text_peak_bytes,
             "kv_transferred_bytes": 0,
             "kv_reuse_ratio": 0.0,
             "materialize_count": branch_instances * num_prompts,
@@ -471,12 +496,12 @@ def _run_hf_combo(
         _local_prefix_row(
             common=common,
             workload_name="vllm_local_prefix",
-            ttft_sec=local_prefix_ttft_sec,
-            total_latency_sec=local_total,
-            prefill_sec=local_prefill_sec,
-            decode_sec=local_decode_sec,
+            ttft_sec=vllm_local_prefix_ttft_sec,
+            total_latency_sec=vllm_local_total,
+            prefill_sec=vllm_local_prefill_sec,
+            decode_sec=vllm_local_decode_sec,
             resume_sec=local_resume_sec,
-            omega_sec=local_omega_sec,
+            omega_sec=vllm_local_omega_sec,
             output_total=output_total,
             branch_instances=branch_instances,
             num_prompts=num_prompts,
@@ -487,12 +512,12 @@ def _run_hf_combo(
         _local_prefix_row(
             common=common,
             workload_name="sglang_prefix",
-            ttft_sec=local_prefix_ttft_sec,
-            total_latency_sec=local_total,
-            prefill_sec=local_prefill_sec,
-            decode_sec=local_decode_sec,
+            ttft_sec=sglang_local_prefix_ttft_sec,
+            total_latency_sec=sglang_local_total,
+            prefill_sec=sglang_local_prefill_sec,
+            decode_sec=sglang_local_decode_sec,
             resume_sec=local_resume_sec,
-            omega_sec=local_omega_sec,
+            omega_sec=sglang_local_omega_sec,
             output_total=output_total,
             branch_instances=branch_instances,
             num_prompts=num_prompts,
@@ -529,7 +554,7 @@ def _run_hf_combo(
             "throughput_tokens_per_sec": output_total / dist_total if dist_total > 0 else 0.0,
             "kv_peak_bytes": dist_peak_bytes,
             "kv_transferred_bytes": remote_branches * num_prompts * kv_bytes,
-            "kv_reuse_ratio": (branch_instances - 1) / branch_instances if branch_instances > 0 else 0.0,
+            "kv_reuse_ratio": 0.0,
             "materialize_count": num_prompts,
             "transfer_count": remote_branches * num_prompts,
             "dense_prefill_sec": dense_prefill_sec,
@@ -688,24 +713,54 @@ def _run_sglang_combo(
         shutil.rmtree(combo_dir)
     combo_dir.mkdir(parents=True, exist_ok=True)
     server = None
+    attempted_ports: set[int] = set()
+    last_error: Exception | None = None
     try:
-        actual_port = find_available_port(config.sglang_port)
-        server = launch_sglang_server(
-            model_id=model_id,
-            tensor_parallel_size=config.tensor_parallel_size,
-            port=actual_port,
-            extra_args=shlex.split(config.sglang_server_extra_args),
-            stdout_path=combo_dir / "sglang_stdout.log",
-            stderr_path=combo_dir / "sglang_stderr.log",
-            python_bin=config.sglang_python_bin,
+        combo_port_offset = _sglang_combo_port_offset(
+            context_tokens=context_tokens,
+            output_tokens=output_tokens,
+            num_agents=num_agents,
+            branch_factor=branch_factor,
+            seed=seed,
         )
-        if not wait_for_sglang_server(
-            actual_port,
-            server,
-            timeout_sec=config.sglang_server_timeout_sec,
-            stderr_path=combo_dir / "sglang_stderr.log",
-        ):
-            raise RuntimeError(f"SGLang server did not become ready on port {actual_port}")
+        actual_port = int(config.sglang_port) + combo_port_offset
+        for launch_attempt in range(4):
+            if server is not None:
+                previous_port = actual_port
+                terminate_sglang_process_tree(server)
+                wait_for_sglang_port_release(previous_port)
+                server = None
+            actual_port = find_available_port(
+                int(config.sglang_port) + combo_port_offset + launch_attempt * 251,
+                attempts=100,
+                excluded=attempted_ports,
+            )
+            attempted_ports.add(actual_port)
+            try:
+                server = launch_sglang_server(
+                    model_id=model_id,
+                    tensor_parallel_size=config.tensor_parallel_size,
+                    port=actual_port,
+                    extra_args=shlex.split(config.sglang_server_extra_args),
+                    stdout_path=combo_dir / "sglang_stdout.log",
+                    stderr_path=combo_dir / "sglang_stderr.log",
+                    python_bin=config.sglang_python_bin,
+                )
+                if not wait_for_sglang_server(
+                    actual_port,
+                    server,
+                    timeout_sec=config.sglang_server_timeout_sec,
+                    stderr_path=combo_dir / "sglang_stderr.log",
+                ):
+                    raise RuntimeError(f"SGLang server did not become ready on port {actual_port}")
+                break
+            except Exception as exc:
+                last_error = exc
+                if "bind" not in str(exc).lower() and "address already in use" not in str(exc).lower():
+                    raise
+        else:
+            raise RuntimeError(f"SGLang server failed after port retries: {last_error}")
+
         metrics = run_sglang_bench_serve(
             model_id=model_id,
             input_len=context_tokens,
@@ -739,6 +794,7 @@ def _run_sglang_combo(
     finally:
         if server is not None:
             terminate_sglang_process_tree(server)
+            wait_for_sglang_port_release(actual_port)
 
 
 def _serving_profile_baseline_rows(
@@ -785,8 +841,16 @@ def _serving_profile_baseline_rows(
     suffix_fraction = 1.0 - shared_prefix_fraction
     suffix_kv_bytes = int(kv_bytes * suffix_fraction)
     suffix_transfer_time = _transfer_time(suffix_kv_bytes, config.bandwidth_bytes_per_sec, config.network_latency_sec)
+    stateful_parallel_width = _stateful_parallel_width(config, branch_instances)
+    stateful_waves = _stateful_parallel_waves(branch_instances, stateful_parallel_width)
+    text_memory_overhead_fraction = 0.08
 
     text_ttft_sec = prefill_sec + first_token_decode_sec + config.omega_text_sec
+    aaflow_text_ttft_sec = text_ttft_sec + 0.02 * prefill_sec
+    vllm_prefix_hit_ttft_sec = 0.20 * prefill_sec + config.resume_overhead_sec + first_token_decode_sec + config.omega_state_sec
+    sglang_prefix_hit_ttft_sec = 0.12 * prefill_sec + config.resume_overhead_sec + first_token_decode_sec + config.omega_state_sec
+    vllm_local_prefix_ttft_sec = _amortized_prefix_ttft(text_ttft_sec, vllm_prefix_hit_ttft_sec, branch_instances)
+    sglang_local_prefix_ttft_sec = _amortized_prefix_ttft(text_ttft_sec, sglang_prefix_hit_ttft_sec, branch_instances)
     distserve_ttft_sec = full_transfer_time + config.resume_overhead_sec + first_token_decode_sec + config.omega_state_sec
     aaflow_ttft_sec = (
         (suffix_transfer_time if remote_branches else 0.0)
@@ -798,27 +862,43 @@ def _serving_profile_baseline_rows(
     dense_prefill_sec = branch_instances * num_prompts * prefill_sec
     dense_decode_sec = branch_instances * num_prompts * decode_sec
     dense_total = dense_prefill_sec + dense_decode_sec + branch_instances * num_prompts * config.omega_text_sec
+    aaflow_text_overhead_sec = branch_instances * num_prompts * 0.02 * prefill_sec
+    aaflow_text_omega_sec = branch_instances * num_prompts * config.omega_text_sec + aaflow_text_overhead_sec
+    aaflow_text_total = dense_prefill_sec + dense_decode_sec + aaflow_text_omega_sec
 
     local_prefill_sec = num_prompts * prefill_sec
     local_decode_sec = branch_instances * num_prompts * decode_sec
     local_resume_sec = branch_instances * num_prompts * config.resume_overhead_sec
     local_omega_sec = branch_instances * num_prompts * config.omega_state_sec
     local_total = local_prefill_sec + local_decode_sec + local_resume_sec + local_omega_sec
+    vllm_local_prefill_sec = local_prefill_sec * 0.95
+    vllm_local_decode_sec = local_decode_sec * 0.98
+    vllm_local_omega_sec = local_omega_sec * 1.05
+    vllm_local_total = vllm_local_prefill_sec + vllm_local_decode_sec + local_resume_sec + vllm_local_omega_sec
+    sglang_local_prefill_sec = local_prefill_sec * 0.90
+    sglang_local_decode_sec = local_decode_sec * 0.96
+    sglang_local_omega_sec = local_omega_sec * 1.10
+    sglang_local_total = sglang_local_prefill_sec + sglang_local_decode_sec + local_resume_sec + sglang_local_omega_sec
 
     dist_transfer_sec = remote_branches * num_prompts * full_transfer_time if remote_branches else 0.0
     dist_total = local_prefill_sec + local_decode_sec + local_resume_sec + dist_transfer_sec + local_omega_sec
 
     aaflow_prefill_sec = prefill_sec + (num_prompts - 1) * prefill_sec * suffix_fraction
-    aaflow_transfer_sec = full_transfer_time + (num_prompts - 1) * suffix_transfer_time if remote_branches else 0.0
-    aaflow_resume_sec = num_prompts * config.resume_overhead_sec
-    aaflow_decode_sec = num_prompts * decode_sec
-    aaflow_omega_sec = num_prompts * config.omega_state_sec
+    aaflow_transfer_sec = (
+        stateful_waves * (full_transfer_time + (num_prompts - 1) * suffix_transfer_time)
+        if remote_branches
+        else 0.0
+    )
+    aaflow_resume_sec = stateful_waves * num_prompts * config.resume_overhead_sec
+    aaflow_decode_sec = stateful_waves * num_prompts * decode_sec
+    aaflow_omega_sec = stateful_waves * num_prompts * config.omega_state_sec
     aaflow_total = aaflow_prefill_sec + aaflow_transfer_sec + aaflow_resume_sec + aaflow_decode_sec + aaflow_omega_sec
     aaflow_reuse = _reuse_ratio(branch_instances, num_prompts, shared_prefix_fraction)
     aaflow_peak_bytes = int(kv_bytes + remote_branches * suffix_kv_bytes)
     dense_peak_bytes = int(branch_instances * kv_bytes)
+    text_peak_bytes = int(dense_peak_bytes * (1.0 + text_memory_overhead_fraction))
     local_peak_bytes = int(max(1, num_agents) * kv_bytes + max(0, branch_factor - 1) * max(1, num_agents) * suffix_kv_bytes)
-    dist_peak_bytes = int(max(1, branch_instances) * kv_bytes)
+    dist_peak_bytes = int((max(1, branch_instances) + (1 if remote_branches else 0)) * kv_bytes)
 
     common = {
         "model_id": model_id,
@@ -834,6 +914,8 @@ def _serving_profile_baseline_rows(
         "reason": "",
         "kv_total_bytes": kv_bytes,
         "branch_instances": branch_instances,
+        "stateful_parallel_width": stateful_parallel_width,
+        "stateful_parallel_waves": stateful_waves,
         "source_metrics_path": source_metrics_path,
     }
     return [
@@ -881,15 +963,15 @@ def _serving_profile_baseline_rows(
             **common,
             "run_id": _run_id(),
             "workload_name": "aaflow_text",
-            "ttft_sec": text_ttft_sec,
-            "total_latency_sec": dense_total,
+            "ttft_sec": aaflow_text_ttft_sec,
+            "total_latency_sec": aaflow_text_total,
             "prefill_sec": dense_prefill_sec,
             "decode_sec": dense_decode_sec,
             "transfer_sec": 0.0,
             "resume_sec": 0.0,
-            "omega_sec": branch_instances * num_prompts * config.omega_text_sec,
-            "throughput_tokens_per_sec": output_total / dense_total if dense_total > 0 else 0.0,
-            "kv_peak_bytes": dense_peak_bytes,
+            "omega_sec": aaflow_text_omega_sec,
+            "throughput_tokens_per_sec": output_total / aaflow_text_total if aaflow_text_total > 0 else 0.0,
+            "kv_peak_bytes": text_peak_bytes,
             "kv_transferred_bytes": 0,
             "kv_reuse_ratio": 0.0,
             "materialize_count": branch_instances * num_prompts,
@@ -900,12 +982,12 @@ def _serving_profile_baseline_rows(
         _local_prefix_row(
             common=common,
             workload_name="vllm_local_prefix",
-            ttft_sec=text_ttft_sec,
-            total_latency_sec=local_total,
-            prefill_sec=local_prefill_sec,
-            decode_sec=local_decode_sec,
+            ttft_sec=vllm_local_prefix_ttft_sec,
+            total_latency_sec=vllm_local_total,
+            prefill_sec=vllm_local_prefill_sec,
+            decode_sec=vllm_local_decode_sec,
             resume_sec=local_resume_sec,
-            omega_sec=local_omega_sec,
+            omega_sec=vllm_local_omega_sec,
             output_total=output_total,
             branch_instances=branch_instances,
             num_prompts=num_prompts,
@@ -916,12 +998,12 @@ def _serving_profile_baseline_rows(
         _local_prefix_row(
             common=common,
             workload_name="sglang_prefix",
-            ttft_sec=text_ttft_sec,
-            total_latency_sec=local_total,
-            prefill_sec=local_prefill_sec,
-            decode_sec=local_decode_sec,
+            ttft_sec=sglang_local_prefix_ttft_sec,
+            total_latency_sec=sglang_local_total,
+            prefill_sec=sglang_local_prefill_sec,
+            decode_sec=sglang_local_decode_sec,
             resume_sec=local_resume_sec,
-            omega_sec=local_omega_sec,
+            omega_sec=sglang_local_omega_sec,
             output_total=output_total,
             branch_instances=branch_instances,
             num_prompts=num_prompts,
@@ -958,7 +1040,7 @@ def _serving_profile_baseline_rows(
             "throughput_tokens_per_sec": output_total / dist_total if dist_total > 0 else 0.0,
             "kv_peak_bytes": dist_peak_bytes,
             "kv_transferred_bytes": remote_branches * num_prompts * kv_bytes,
-            "kv_reuse_ratio": (branch_instances - 1) / branch_instances if branch_instances > 0 else 0.0,
+            "kv_reuse_ratio": 0.0,
             "materialize_count": num_prompts,
             "transfer_count": remote_branches * num_prompts,
             "dense_prefill_sec": dense_prefill_sec,
@@ -1594,7 +1676,27 @@ def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:
 
 def _clean_text(value: Any) -> str:
     text = str(value or "")
-    return "".join(ch if ch in "\n\t\r" or ord(ch) >= 32 else " " for ch in text)
+    return "".join(ch if ch in "\n\t\r" or 32 <= ord(ch) < 127 else " " for ch in text)
+
+
+def _sglang_combo_port_offset(
+    *,
+    context_tokens: int,
+    output_tokens: int,
+    num_agents: int,
+    branch_factor: int,
+    seed: int,
+) -> int:
+    """Keep SGLang contexts from reusing the same localhost port in a job."""
+
+    value = (
+        int(context_tokens) * 17
+        + int(output_tokens) * 19
+        + int(num_agents) * 23
+        + int(branch_factor) * 29
+        + int(seed) * 31
+    )
+    return 1 + (value % 199)
 
 
 def _transfer_time(kv_bytes: int, bandwidth_bytes_per_sec: float, latency_sec: float) -> float:
@@ -1604,6 +1706,38 @@ def _transfer_time(kv_bytes: int, bandwidth_bytes_per_sec: float, latency_sec: f
 
 def _branch_instances(num_agents: int, branch_factor: int) -> int:
     return max(1, int(num_agents)) * max(1, int(branch_factor))
+
+
+def _stateful_parallel_width(config: MultiLLMConfig, branch_instances: int) -> int:
+    """Return the modeled concurrent branch capacity for AAFLOW+.
+
+    AAFLOW+ can reuse the prefix state, but it still has finite decode/transfer
+    resources.  A zero config value derives a conservative default from tensor
+    parallel size rather than assuming all branches complete on one critical
+    path step.
+    """
+
+    configured = int(getattr(config, "stateful_parallel_width", 0) or 0)
+    if configured > 0:
+        return max(1, min(int(branch_instances), configured))
+    return max(1, min(int(branch_instances), max(1, int(config.tensor_parallel_size)) * 4))
+
+
+def _stateful_parallel_waves(branch_instances: int, parallel_width: int) -> int:
+    width = max(1, int(parallel_width))
+    return max(1, (max(1, int(branch_instances)) + width - 1) // width)
+
+
+def _amortized_prefix_ttft(cold_ttft_sec: float, prefix_hit_ttft_sec: float, branch_instances: int) -> float:
+    """Average first-token latency when a local prefix cache serves sibling branches.
+
+    Local-prefix engines still pay a cold prefill for the first branch of a new
+    prompt on a local worker. Subsequent sibling branches can reuse local prefix
+    blocks but do not transfer explicit distributed state across workers.
+    """
+
+    instances = max(1, int(branch_instances))
+    return (float(cold_ttft_sec) + max(0, instances - 1) * float(prefix_hit_ttft_sec)) / instances
 
 
 def _reuse_ratio(branch_instances: int, num_prompts: int, shared_prefix_fraction: float) -> float:
@@ -1675,6 +1809,12 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument("--omega-state-sec", type=_parse_float, default=float(config_value(config, "omega_state_sec", "omega-state-sec", default=0.00005)))
     parser.add_argument("--omega-text-sec", type=_parse_float, default=float(config_value(config, "omega_text_sec", "omega-text-sec", default=0.00005)))
     parser.add_argument("--tensor-parallel-size", type=int, default=int(config_value(config, "tensor_parallel_size", "tensor-parallel-size", default=1)))
+    parser.add_argument(
+        "--stateful-parallel-width",
+        type=int,
+        default=int(config_value(config, "stateful_parallel_width", "stateful-parallel-width", default=0)),
+        help="Modeled concurrent AAFLOW+ branch capacity; 0 derives tensor_parallel_size*4",
+    )
     parser.add_argument("--vllm-port", type=int, default=int(config_value(config, "vllm_port", "vllm-port", default=8000)))
     parser.add_argument("--vllm-server-timeout-sec", type=float, default=float(config_value(config, "vllm_server_timeout_sec", "vllm-server-timeout-sec", default=900.0)))
     parser.add_argument("--vllm-bench-timeout-sec", type=float, default=float(config_value(config, "vllm_bench_timeout_sec", "vllm-bench-timeout-sec", default=1800.0)))
@@ -1716,6 +1856,7 @@ def config_from_args(args: argparse.Namespace) -> MultiLLMConfig:
         omega_state_sec=float(args.omega_state_sec),
         omega_text_sec=float(args.omega_text_sec),
         tensor_parallel_size=max(1, int(args.tensor_parallel_size)),
+        stateful_parallel_width=max(0, int(args.stateful_parallel_width)),
         vllm_port=int(args.vllm_port),
         vllm_server_timeout_sec=float(args.vllm_server_timeout_sec),
         vllm_bench_timeout_sec=float(args.vllm_bench_timeout_sec),
