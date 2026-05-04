@@ -44,24 +44,21 @@ module adds a separate state-aware layer:
 ## Environment Setup
 
 Use `stateful_agentic_algebra/env.sh` as the single local path file. New users
-should change only these three variables for a different checkout, environment
+should change only these three variables inside that file for a different checkout, environment
 root, or scratch/cache location:
 
 ```bash
-export PRJ_PATH=/project/bi_dsc_community/drc_rag
-export ENV_PATH=/scratch/$USER/env
-export DATA_PATH=/scratch/$USER/stateful_aaflow
+export PRJ_PATH=/raid/${USER}/drc_rag #Change it for your project home directory
 source "$PRJ_PATH/stateful_agentic_algebra/env.sh"
 cd "$PRJ_PATH"
 export PYTHONPATH="$PRJ_PATH:${PYTHONPATH:-}"
 ```
 
-`SAA_BENCH_ENV=$ENV_PATH/drc_rag_bench_env` #It is an alternatives for saa_sglang_env. drc_rag_bench_env is used for my local environment. use saa_sglang_env for your local settings.
 
 `env.sh` derives:
 
 - `SAA_VLLM_ENV=$ENV_PATH/saa_vllm_env`
-- `SAA_BENCH_ENV=$ENV_PATH/drc_rag_bench_env` 
+- `SAA_BENCH_ENV=$ENV_PATH/saa_sglang_env` 
 - `PYTHON_BIN=$SAA_VLLM_ENV/bin/python`
 - `SGLANG_PYTHON_BIN=$SAA_BENCH_ENV/bin/python`
 - `PLOT_PYTHON_BIN=$SGLANG_PYTHON_BIN`
@@ -70,20 +67,7 @@ export PYTHONPATH="$PRJ_PATH:${PYTHONPATH:-}"
 - `TRANSFORMERS_CACHE=$HF_HOME/transformers`
 
 For a clean third-party setup, create a dedicated SGLang environment named
-`saa_sglang_env` and point `SAA_BENCH_ENV` to it:
-
-```bash
-export SAA_BENCH_ENV="$ENV_PATH/saa_sglang_env"
-export SGLANG_PYTHON_BIN="$SAA_BENCH_ENV/bin/python"
-```
-
-On the current cluster account, the verified SGLang-capable environment is:
-
-```text
-/scratch/djy8hg/env/drc_rag_bench_env
-```
-
-Use `drc_rag_bench_env` for existing Slurm runs if you access to this environment, or create `saa_sglang_env` for a cleaner new install.
+`saa_sglang_env` and point `SAA_BENCH_ENV` to it which is defined in the `stateful_agentic_algebra/env.sh`.  create `saa_sglang_env` for a cleaner new install for slurm run.
 
 ## vLLM/HF Environment: `saa_vllm_env`
 
@@ -129,8 +113,8 @@ transformers: installed
 vllm: installed
 matplotlib: missing
 torch_version: 2.9.0+cu128
-cuda_available: False
-cuda_device_count: 0
+cuda_available: True
+cuda_device_count: 5
 ```
 
 `cuda_available=False` is expected on login shells without a GPU allocation.
@@ -150,6 +134,7 @@ SGLang in a separate environment.
 Create a clean SGLang environment:
 
 ```bash
+deactivate #if you are in the saa_vllm_env environment
 cd "$PRJ_PATH"
 python3 -m venv "$ENV_PATH/saa_sglang_env"
 source "$ENV_PATH/saa_sglang_env/bin/activate"
@@ -164,12 +149,6 @@ export SAA_BENCH_ENV="$ENV_PATH/saa_sglang_env"
 export SGLANG_PYTHON_BIN="$SAA_BENCH_ENV/bin/python"
 ```
 
-On the current cluster account, use the existing verified SGLang environment if you have access to this directory:
-
-```bash
-export SAA_BENCH_ENV=/scratch/djy8hg/env/drc_rag_bench_env
-export SGLANG_PYTHON_BIN="$SAA_BENCH_ENV/bin/python"
-```
 
 SGLang JIT compilation needs a modern host compiler on this cluster:
 
