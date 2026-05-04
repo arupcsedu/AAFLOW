@@ -3,10 +3,6 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH -A bii_dsc_community
-#SBATCH --partition=bii-gpu
-#SBATCH --reservation=bi_fox_dgx
-#SBATCH --gres=gpu:a100:1
 #SBATCH --mem=128G
 #SBATCH --time=06:00:00
 #SBATCH --output=slurm-%x-%j.out
@@ -15,19 +11,17 @@
 set -euo pipefail
 export SLURM_CPU_BIND=none
 
-# Override the generic GPU request at submit time for a specific accelerator:
-#   sbatch -p gpu --gres=gpu:a100:1 ...
+# Resource requests are intentionally supplied at submit time. Example:
+#   sbatch -A <account> -p <partition> --gres=gpu:<type>:1 ...
 
 SAA_ENV_FILE="${SAA_ENV_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/env.sh}"
 if [[ -f "$SAA_ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$SAA_ENV_FILE"
+else
+  echo "Missing Stateful Agentic Algebra env file: $SAA_ENV_FILE" >&2
+  exit 1
 fi
-
-PROJECT_ROOT="${PROJECT_ROOT:-${PRJ_PATH:-/project/bi_dsc_community/drc_rag}}"
-ENV_PATH="${ENV_PATH:-/scratch/${USER}/env}"
-DATA_PATH="${DATA_PATH:-/scratch/${USER}/stateful_aaflow}"
-PYTHON_BIN="${PYTHON_BIN:-$ENV_PATH/saa_vllm_env/bin/python}"
 
 MODEL_ID="${MODEL_ID:-gpt2}"
 BACKEND="${BACKEND:-vllm}"

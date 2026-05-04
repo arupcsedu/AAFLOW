@@ -1,12 +1,15 @@
 #!/bin/bash
+# Submit resource options at the command line, because accounts, partitions,
+# reservations, and GPU names vary across clusters. Example:
+#   sbatch -A <account> -p <gpu_partition> --gres=gpu:<gpu_type>:2 \
+#     stateful_agentic_algebra/slurm/run_paper_experiment.sbatch
+#
+# The same script can also be run directly on a GPU login/workstation node:
+#   bash stateful_agentic_algebra/slurm/run_paper_experiment.sbatch
 #SBATCH --job-name=saa-paper-exp
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH -A bii_dsc_community
-#SBATCH --partition=bii-gpu
-#SBATCH --reservation=bi_fox_dgx
-#SBATCH --gres=gpu:a100:2
 #SBATCH --mem=256G
 #SBATCH --time=24:00:00
 #SBATCH --output=slurm-%x-%j.out
@@ -20,16 +23,13 @@ SAA_ENV_FILE="${SAA_ENV_FILE:-$SCRIPT_DIR/../env.sh}"
 if [[ -f "$SAA_ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$SAA_ENV_FILE"
+else
+  echo "Missing Stateful Agentic Algebra env file: $SAA_ENV_FILE" >&2
+  exit 1
 fi
 
-PROJECT_ROOT="${PROJECT_ROOT:-${PRJ_PATH:-/project/bi_dsc_community/drc_rag}}"
-ENV_PATH="${ENV_PATH:-/scratch/${USER}/env}"
-DATA_PATH="${DATA_PATH:-/scratch/${USER}/stateful_aaflow}"
-PYTHON_BIN="${PYTHON_BIN:-$ENV_PATH/saa_vllm_env/bin/python}"
-SGLANG_PYTHON_BIN="${SGLANG_PYTHON_BIN:-$ENV_PATH/drc_rag_bench_env/bin/python}"
 CONFIG_PATH="${CONFIG_PATH:?CONFIG_PATH must point to a paper experiment YAML file}"
 OUTPUT_DIR="${OUTPUT_DIR:-}"
-PLOT_PYTHON_BIN="${PLOT_PYTHON_BIN:-$ENV_PATH/drc_rag_bench_env/bin/python}"
 SGLANG_GCC_MODULE="${SGLANG_GCC_MODULE:-gcc/12.4.0}"
 CUDA_MODULE="${CUDA_MODULE:-}"
 JOB_PORT_OFFSET=$(( (${SLURM_JOB_ID:-0} % 40) * 1000 ))
@@ -99,8 +99,48 @@ export SGLANG_PYTHON_BIN
 mkdir -p "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE"
 cd "$PROJECT_ROOT"
 
+LOCAL_GPU_INDICES=""
+if command -v nvidia-smi >/dev/null 2>&1; then
+  LOCAL_GPU_INDICES="$(nvidia-smi --query-gpu=index,name --format=csv,noheader,nounits 2>/dev/null | \
+    awk -F, '
+      {
+        idx=$1; name=$2
+        gsub(/^[ \t]+|[ \t]+$/, "", idx)
+        gsub(/^[ \t]+|[ \t]+$/, "", name)
+        if (name !~ /Display/ && name ~ /(A100|H100|V100|L40|L4|RTX|Tesla|NVIDIA)/) {
+          print idx
+        }
+      }
+    ' | paste -sd, -)"
+fi
+LOCAL_GPU_COUNT=0
+if [[ -n "$LOCAL_GPU_INDICES" ]]; then
+  LOCAL_GPU_COUNT="$(awk -F, '{print NF}' <<<"$LOCAL_GPU_INDICES")"
+fi
+LOCAL_GPU_COUNT="${LOCAL_GPU_COUNT:-0}"
+if [[ -z "${SLURM_JOB_ID:-}" && "$LOCAL_GPU_COUNT" -gt 0 && -z "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+  LOCAL_GPU_LIMIT="${SAA_LOCAL_GPUS:-$LOCAL_GPU_COUNT}"
+  if ! [[ "$LOCAL_GPU_LIMIT" =~ ^[0-9]+$ ]] || [[ "$LOCAL_GPU_LIMIT" -lt 1 ]]; then
+    LOCAL_GPU_LIMIT="$LOCAL_GPU_COUNT"
+  fi
+  if [[ "$LOCAL_GPU_LIMIT" -gt "$LOCAL_GPU_COUNT" ]]; then
+    LOCAL_GPU_LIMIT="$LOCAL_GPU_COUNT"
+  fi
+  CUDA_VISIBLE_DEVICES="$(cut -d, -f "1-$LOCAL_GPU_LIMIT" <<<"$LOCAL_GPU_INDICES")"
+  export CUDA_VISIBLE_DEVICES
+fi
+
+LAUNCHER=()
+if [[ -n "${SLURM_JOB_ID:-}" && "${SAA_USE_SRUN:-1}" == "1" && -n "$(command -v srun || true)" ]]; then
+  LAUNCHER=(srun --cpu-bind=none --nodes=1 --ntasks=1 --cpus-per-task="${SLURM_CPUS_PER_TASK:-8}")
+fi
+
 echo "Job: ${SLURM_JOB_ID:-manual}"
 echo "Node list: ${SLURM_NODELIST:-unknown}"
+echo "Launcher: ${LAUNCHER[*]:-direct}"
+echo "Detected local GPUs: $LOCAL_GPU_COUNT"
+echo "Detected compute GPU indices: ${LOCAL_GPU_INDICES:-none}"
+echo "CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-unset}"
 echo "Config: $CONFIG_PATH"
 echo "Output override: ${OUTPUT_DIR:-from config}"
 echo "Project: $PROJECT_ROOT"
@@ -155,7 +195,7 @@ PY
 )"
 
 /usr/bin/time -v \
-  srun --cpu-bind=none --nodes=1 --ntasks=1 --cpus-per-task="${SLURM_CPUS_PER_TASK:-8}" \
+  "${LAUNCHER[@]}" \
   "$PYTHON_BIN" -m stateful_agentic_algebra.paper_experiment_runner "${RUN_ARGS[@]}"
 
 rm -rf "$RESOLVED_OUTPUT_DIR/figures"

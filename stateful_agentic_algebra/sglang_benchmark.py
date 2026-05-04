@@ -138,15 +138,6 @@ def wait_for_server(port: int, timeout_sec: float = 600.0, poll_interval_sec: fl
             try:
                 with urlopen(url, timeout=2.0) as response:
                     if 200 <= int(response.status) < 300:
-                        time.sleep(1.0)
-                        if process.poll() is not None:
-                            raise RuntimeError(
-                                f"SGLang server exited after health check on port {port} "
-                                f"with code {process.returncode}: {_tail_file(stderr_path)}"
-                            )
-                        stderr_text = _tail_file(stderr_path, max_bytes=4096, start_at=last_stderr_size)
-                        if "address already in use" in stderr_text.lower() or "error while attempting to bind" in stderr_text.lower():
-                            raise RuntimeError(f"SGLang server failed to bind port {port}: {_tail_file(stderr_path)}")
                         return True
             except (HTTPError, URLError, TimeoutError, OSError, socket.timeout):
                 pass
@@ -344,6 +335,8 @@ def run_cli(args: argparse.Namespace) -> int:
         (output_dir / "sglang_bench_raw.txt").write_text("", encoding="utf-8")
         print(message)
         return 2 if args.require_sglang else 0
+
+    _purge_stale_jit_caches(_subprocess_env(args.python_bin))
 
     server: Optional[subprocess.Popen[Any]] = None
     try:
@@ -558,13 +551,96 @@ def _sglang_executable(python_bin: str | None = None) -> str | None:
 
 def _subprocess_env(python_bin: str | None = None) -> dict[str, str]:
     env = os.environ.copy()
+    env.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+    cuda_home = _resolve_cuda_home(env)
+    path_parts: list[str] = []
+    lib_parts: list[str] = []
+    if cuda_home:
+        env["CUDA_HOME"] = str(cuda_home)
+        env["CUDA_PATH"] = str(cuda_home)
+        path_parts.append(str(cuda_home / "bin"))
+        lib64 = cuda_home / "lib64"
+        if lib64.is_dir():
+            lib_parts.append(str(lib64))
     if python_bin:
         bin_dir = str(Path(python_bin).resolve().parent)
-        env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
+        path_parts.append(bin_dir)
         lib_paths = _nvidia_lib_paths(python_bin)
         if lib_paths:
-            env["LD_LIBRARY_PATH"] = lib_paths + os.pathsep + env.get("LD_LIBRARY_PATH", "")
+            lib_parts.append(lib_paths)
+    if path_parts:
+        env["PATH"] = os.pathsep.join(path_parts + [env.get("PATH", "")])
+    if lib_parts:
+        env["LD_LIBRARY_PATH"] = os.pathsep.join(lib_parts + [env.get("LD_LIBRARY_PATH", "")])
     return env
+
+
+def _resolve_cuda_home(env: dict[str, str]) -> Optional[Path]:
+    """Find a CUDA toolkit with a real ``nvcc`` for SGLang JIT subprocesses."""
+
+    candidates: list[Path] = []
+    for key in ("SAA_CUDA_HOME",):
+        value = env.get(key)
+        if value:
+            candidates.append(Path(value).expanduser())
+    user = env.get("USER")
+    if user:
+        candidates.append(Path("/raid") / user / "cuda-12.8")
+    candidates.append(Path("/raid/arup/cuda-12.8"))
+    for key in ("CUDA_HOME", "CUDA_PATH"):
+        value = env.get(key)
+        if value:
+            candidates.append(Path(value).expanduser())
+    candidates.append(Path("/usr/local/cuda"))
+    seen: set[Path] = set()
+    for candidate in candidates:
+        candidate = candidate.resolve()
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        nvcc = candidate / "bin" / "nvcc"
+        if nvcc.exists() and os.access(nvcc, os.X_OK):
+            return candidate
+    return None
+
+
+def _purge_stale_jit_caches(env: dict[str, str]) -> None:
+    """Remove JIT cache directories generated with a stale CUDA toolkit path.
+
+    FlashInfer and tvm-ffi write absolute CUDA paths into ``build.ninja``. If a
+    cache was created while ``/usr/local/cuda`` pointed at CUDA 11, later runs
+    can keep invoking that stale compiler even after ``CUDA_HOME`` is fixed.
+    """
+
+    cuda_home = env.get("CUDA_HOME") or ""
+    if not cuda_home:
+        return
+    expected = str(Path(cuda_home).resolve())
+    cache_roots = [
+        Path.home() / ".cache" / "flashinfer",
+        Path.home() / ".cache" / "tvm-ffi",
+    ]
+    for root in cache_roots:
+        if not root.exists():
+            continue
+        try:
+            ninja_files = list(root.rglob("build.ninja"))
+        except OSError:
+            continue
+        for ninja_file in ninja_files:
+            if not ninja_file.exists():
+                continue
+            try:
+                text = ninja_file.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if "/usr/local/cuda" not in text and expected in text:
+                continue
+            cache_dir = ninja_file.parent
+            try:
+                shutil.rmtree(cache_dir)
+            except OSError:
+                pass
 
 
 def _nvidia_lib_paths(python_bin: str) -> str:

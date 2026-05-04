@@ -10,13 +10,14 @@ output_grid:
   - 64
 seeds:
   - 0
-tensor_parallel_size: 2
+tensor_parallel_size: 4
 bandwidth_bytes_per_sec: 25000000000
 network_latency_sec: 5e-05
 resume_overhead_sec: 0.0001
 omega_state_sec: 5e-05
 omega_text_sec: 5e-05
 hf_device: auto
+hf_device_map: balanced
 progress: true
 skip_invalid_context: true
 output_dir: runs/stateful/full_paper/exp1_ttft_reduction_llama3_hf

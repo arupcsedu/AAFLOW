@@ -98,6 +98,12 @@ RESULT_FIELDS = [
     "kvcomm_reuse_fraction",
     "stateful_parallel_width",
     "stateful_parallel_waves",
+    "hf_cuda_device_count",
+    "hf_active_cuda_devices",
+    "hf_tensor_parallel_size",
+    "hf_device",
+    "hf_device_map_requested",
+    "hf_device_map_effective",
 ]
 
 HF_MEASURED_BASELINES = (
@@ -140,6 +146,8 @@ class MultiLLMConfig:
     tensor_parallel_size: int = 1
     dry_run: bool = False
     hf_device: str = "auto"
+    hf_device_map: str = "auto"
+    hf_max_memory_per_gpu: str = ""
     hf_local_files_only: bool = False
     skip_invalid_context: bool = True
     progress: bool = True
@@ -158,7 +166,7 @@ def run_matrix(config: MultiLLMConfig) -> list[dict[str, Any]]:
 
     rows: list[dict[str, Any]] = []
     hf_cache: dict[tuple[str, int, int, int], HFMeasurement] = {}
-    hf_backend_cache: dict[tuple[str, int, str, bool], HFKVBackend] = {}
+    hf_backend_cache: dict[tuple[str, int, str, str, str, int, bool], HFKVBackend] = {}
     current_hf_model: Optional[str] = None
     raw_path = output_dir / "results_raw.jsonl"
     with raw_path.open("w", encoding="utf-8") as raw_file:
@@ -284,7 +292,7 @@ def _run_hf_combo(
     branch_factor: int,
     seed: int,
     cache: dict[tuple[str, int, int, int], HFMeasurement],
-    backend_cache: dict[tuple[str, int, str, bool], HFKVBackend],
+    backend_cache: dict[tuple[str, int, str, str, str, int, bool], HFKVBackend],
     output_dir: Path,
 ) -> list[dict[str, Any]]:
     cache_key = (model_id, int(context_tokens), int(output_tokens), int(seed))
@@ -295,7 +303,15 @@ def _run_hf_combo(
         try:
             measurement = cache.get(cache_key)
             if measurement is None:
-                backend_key = (model_id, int(seed), str(config.hf_device), bool(config.hf_local_files_only))
+                backend_key = (
+                    model_id,
+                    int(seed),
+                    str(config.hf_device),
+                    str(config.hf_device_map),
+                    str(config.hf_max_memory_per_gpu),
+                    int(config.tensor_parallel_size),
+                    bool(config.hf_local_files_only),
+                )
                 backend = backend_cache.get(backend_key)
                 if backend is None:
                     backend = HFKVBackend(
@@ -303,6 +319,9 @@ def _run_hf_combo(
                             model_id=model_id,
                             tokenizer_id=model_id,
                             device=config.hf_device,
+                            device_map=config.hf_device_map,
+                            tensor_parallel_size=config.tensor_parallel_size,
+                            max_memory_per_gpu=config.hf_max_memory_per_gpu,
                             local_files_only=config.hf_local_files_only,
                             seed=seed,
                         )
@@ -431,6 +450,12 @@ def _run_hf_combo(
         "stateful_parallel_waves": stateful_waves,
         "source_metrics_path": source_metrics_path,
         "hf_prefill_ttft_sec": ttft_sec,
+        "hf_device": measured.get("hf_device", ""),
+        "hf_device_map_requested": measured.get("hf_device_map_requested", ""),
+        "hf_device_map_effective": measured.get("hf_device_map_effective", ""),
+        "hf_cuda_device_count": measured.get("hf_cuda_device_count", ""),
+        "hf_active_cuda_devices": measured.get("hf_active_cuda_devices", ""),
+        "hf_tensor_parallel_size": measured.get("hf_tensor_parallel_size", ""),
     }
     return [
         {
@@ -1824,6 +1849,16 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument("--sglang-python-bin", default=str(config_value(config, "sglang_python_bin", "sglang-python-bin", default="")))
     parser.add_argument("--sglang-server-extra-args", default=str(config_value(config, "sglang_server_extra_args", "sglang-server-extra-args", default="")))
     parser.add_argument("--hf-device", default=str(config_value(config, "hf_device", "hf-device", default="auto")), choices=["auto", "cpu", "cuda"])
+    parser.add_argument(
+        "--hf-device-map",
+        default=str(config_value(config, "hf_device_map", "hf-device-map", default="auto")),
+        help="Transformers device_map for HF. With --tensor-parallel-size > 1, auto resolves to balanced.",
+    )
+    parser.add_argument(
+        "--hf-max-memory-per-gpu",
+        default=str(config_value(config, "hf_max_memory_per_gpu", "hf-max-memory-per-gpu", default="")),
+        help="Optional Transformers max_memory value per visible GPU, e.g. 70GiB.",
+    )
     parser.add_argument("--hf-local-files-only", action="store_true", default=bool_default(config_value(config, "hf_local_files_only", "hf-local-files-only", default=False)))
     parser.add_argument("--skip-invalid-context", action=argparse.BooleanOptionalAction, default=bool_default(config_value(config, "skip_invalid_context", "skip-invalid-context", default=True)))
     parser.add_argument("--progress", action=argparse.BooleanOptionalAction, default=bool_default(config_value(config, "progress", default=True)))
@@ -1866,6 +1901,8 @@ def config_from_args(args: argparse.Namespace) -> MultiLLMConfig:
         sglang_python_bin=str(args.sglang_python_bin),
         sglang_server_extra_args=str(args.sglang_server_extra_args),
         hf_device=args.hf_device,
+        hf_device_map=str(args.hf_device_map),
+        hf_max_memory_per_gpu=str(args.hf_max_memory_per_gpu),
         hf_local_files_only=bool(args.hf_local_files_only),
         skip_invalid_context=bool(args.skip_invalid_context),
         progress=bool(args.progress),

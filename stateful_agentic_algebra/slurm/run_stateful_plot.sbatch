@@ -3,8 +3,6 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH -A bii_dsc_community
-#SBATCH --partition=parallel
 #SBATCH --mem=8G
 #SBATCH --time=00:20:00
 #SBATCH --output=slurm-%x-%j.out
@@ -17,10 +15,11 @@ SAA_ENV_FILE="${SAA_ENV_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/e
 if [[ -f "$SAA_ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$SAA_ENV_FILE"
+else
+  echo "Missing Stateful Agentic Algebra env file: $SAA_ENV_FILE" >&2
+  exit 1
 fi
 
-PROJECT_ROOT="${PROJECT_ROOT:-${PRJ_PATH:-/project/bi_dsc_community/drc_rag}}"
-PYTHON_BIN="${PYTHON_BIN:-python}"
 BASELINE="${BASELINE:-AAFLOW+}"
 WORKLOAD="${WORKLOAD:-linear_handoff}"
 CONTEXT_TOKENS="${CONTEXT_TOKENS:-128}"

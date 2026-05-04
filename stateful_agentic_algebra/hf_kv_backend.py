@@ -32,6 +32,8 @@ class HFBackendConfig:
     tokenizer_id: Optional[str] = None
     device: str = "auto"
     device_map: str = "auto"
+    tensor_parallel_size: int = 1
+    max_memory_per_gpu: str = ""
     local_files_only: bool = False
     torch_dtype: Optional[str] = None
     keep_tensors: bool = False
@@ -135,9 +137,14 @@ class HFKVBackend:
         model_kwargs: dict[str, Any] = {"local_files_only": self.config.local_files_only}
         if dtype is not None:
             model_kwargs["torch_dtype"] = dtype
-        use_auto_map = self.device == "cuda" and self.config.device_map == "auto"
-        if use_auto_map:
-            model_kwargs["device_map"] = "auto"
+        device_map = self._resolve_device_map(torch)
+        use_device_map = self.device == "cuda" and device_map is not None
+        if use_device_map:
+            model_kwargs["device_map"] = device_map
+            model_kwargs["low_cpu_mem_usage"] = True
+            max_memory = self._resolve_max_memory(torch)
+            if max_memory:
+                model_kwargs["max_memory"] = max_memory
 
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.config.tokenizer_id or self.config.model_id,
@@ -148,15 +155,24 @@ class HFKVBackend:
 
         try:
             self.model = AutoModelForCausalLM.from_pretrained(self.config.model_id, **model_kwargs)
-        except Exception:
-            if not use_auto_map:
+        except Exception as exc:
+            if not use_device_map:
                 raise
+            if self._effective_tensor_parallel_size(torch) > 1:
+                raise RuntimeError(
+                    "HF multi-GPU placement requires Transformers device_map support, "
+                    "usually via the `accelerate` package. Install accelerate in the "
+                    "HF/vLLM environment or run with --tensor-parallel-size 1. "
+                    f"Original load error: {exc}"
+                ) from exc
             fallback_kwargs = dict(model_kwargs)
             fallback_kwargs.pop("device_map", None)
+            fallback_kwargs.pop("max_memory", None)
+            fallback_kwargs.pop("low_cpu_mem_usage", None)
             self.model = AutoModelForCausalLM.from_pretrained(self.config.model_id, **fallback_kwargs)
             self.model.to(self.device)
         else:
-            if not use_auto_map:
+            if not use_device_map:
                 self.model.to(self.device)
         self.model.eval()
         self.input_device = self._model_input_device()
@@ -316,6 +332,7 @@ class HFKVBackend:
                 "requested_context_tokens": int(context_tokens),
                 "generated_tokens": len(cached.generated_token_ids),
                 "outputs_match": cached.generated_token_ids == dense.generated_token_ids,
+                "hf_device_summary": self.device_summary(),
             }
         )
         ttft_sec = prefill.ttft_sec
@@ -344,6 +361,13 @@ class HFKVBackend:
             "generated_tokens": len(cached.generated_token_ids),
             "dense_total_latency_sec": dense.total_latency_sec,
             "outputs_match": cached.generated_token_ids == dense.generated_token_ids,
+            "hf_device": self.device,
+            "hf_device_map_requested": self.config.device_map,
+            "hf_device_map_effective": self._effective_hf_device_map(),
+            "hf_device_summary": self.device_summary(),
+            "hf_cuda_device_count": self._cuda_device_count(),
+            "hf_active_cuda_devices": self._active_cuda_device_count(),
+            "hf_tensor_parallel_size": self._effective_tensor_parallel_size(),
         }
         return HFMeasurement(
             kv_state=kv_state,
@@ -417,6 +441,30 @@ class HFKVBackend:
             return torch.bfloat16
         return torch.float16
 
+    def _resolve_device_map(self, torch: Any) -> Optional[str]:
+        """Choose a Transformers device map for single- or multi-GPU HF runs."""
+
+        if self.device != "cuda":
+            return None
+        requested = (self.config.device_map or "auto").strip().lower()
+        if requested in {"", "none", "single", "single_gpu", "cuda"}:
+            return None
+        if requested == "auto" and self._effective_tensor_parallel_size(torch) > 1:
+            # `auto` tends to fill GPU 0 when the model fits there. For paper
+            # sweeps that explicitly request multiple GPUs, balanced placement
+            # makes the HF microbenchmark consume the visible devices.
+            return "balanced"
+        return requested
+
+    def _resolve_max_memory(self, torch: Any) -> Optional[dict[Any, str]]:
+        if self.device != "cuda":
+            return None
+        per_gpu = (self.config.max_memory_per_gpu or "").strip()
+        if not per_gpu:
+            return None
+        devices = self._effective_tensor_parallel_size(torch)
+        return {idx: per_gpu for idx in range(devices)}
+
     def _resolve_device(self, torch: Any) -> str:
         requested = (self.config.device or "auto").lower()
         if requested == "auto":
@@ -432,13 +480,83 @@ class HFKVBackend:
         if self.model is None:
             return self.torch.device(self.device)
         try:
+            embeddings = self.model.get_input_embeddings()
+            weight = getattr(embeddings, "weight", None)
+            if weight is not None:
+                return weight.device
+        except Exception:
+            pass
+        try:
             return next(self.model.parameters()).device
         except StopIteration:
             return self.torch.device(self.device)
 
     def _synchronize(self) -> None:
         if self.torch is not None and self.device == "cuda":
-            self.torch.cuda.synchronize()
+            for idx in range(self._cuda_device_count()):
+                self.torch.cuda.synchronize(idx)
+
+    def _cuda_device_count(self) -> int:
+        if self.torch is None:
+            return 0
+        try:
+            return int(self.torch.cuda.device_count()) if self.torch.cuda.is_available() else 0
+        except Exception:
+            return 0
+
+    def _effective_tensor_parallel_size(self, torch: Any = None) -> int:
+        module = torch or self.torch
+        requested = max(1, int(self.config.tensor_parallel_size or 1))
+        if module is None or self.device != "cuda":
+            return 1
+        try:
+            visible = int(module.cuda.device_count()) if module.cuda.is_available() else 0
+        except Exception:
+            visible = 0
+        return max(1, min(requested, max(1, visible)))
+
+    def _effective_hf_device_map(self) -> str:
+        if self.model is None:
+            return ""
+        hf_map = getattr(self.model, "hf_device_map", None)
+        if isinstance(hf_map, dict):
+            return json.dumps({str(key): str(value) for key, value in hf_map.items()}, sort_keys=True)
+        return str(hf_map or "")
+
+    def device_summary(self) -> dict[str, Any]:
+        """Return a lightweight placement summary for reproducibility checks."""
+
+        summary: dict[str, Any] = {
+            "device": self.device,
+            "cuda_device_count": self._cuda_device_count(),
+            "tensor_parallel_size": self._effective_tensor_parallel_size(),
+            "device_map_requested": self.config.device_map,
+            "max_memory_per_gpu": self.config.max_memory_per_gpu,
+            "input_device": str(self.input_device) if self.input_device is not None else "",
+        }
+        if self.model is None:
+            return summary
+        hf_map = getattr(self.model, "hf_device_map", None)
+        if isinstance(hf_map, dict):
+            summary["hf_device_map"] = {str(key): str(value) for key, value in hf_map.items()}
+        device_counts: dict[str, int] = {}
+        try:
+            for parameter in self.model.parameters():
+                device = str(parameter.device)
+                device_counts[device] = device_counts.get(device, 0) + 1
+        except Exception:
+            pass
+        summary["parameter_device_counts"] = device_counts
+        summary["active_cuda_devices"] = len([device for device in device_counts if device.startswith("cuda:")])
+        return summary
+
+    def _active_cuda_device_count(self) -> int:
+        summary = self.device_summary()
+        value = summary.get("active_cuda_devices", 0)
+        try:
+            return int(value)
+        except Exception:
+            return 0
 
     def _set_seed(self) -> None:
         random.seed(self.config.seed)
@@ -537,6 +655,8 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument("--output-tokens", type=int, default=32)
     parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
     parser.add_argument("--device-map", default="auto")
+    parser.add_argument("--tensor-parallel-size", type=int, default=1)
+    parser.add_argument("--max-memory-per-gpu", default="", help="Optional max memory per visible GPU, e.g. 70GiB")
     parser.add_argument("--torch-dtype", default=None, help="Optional dtype name, e.g. bfloat16 or float16")
     parser.add_argument("--local-files-only", action="store_true")
     parser.add_argument("--seed", type=int, default=7)
@@ -554,6 +674,8 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
             tokenizer_id=args.tokenizer_id or args.model_id,
             device=args.device,
             device_map=args.device_map,
+            tensor_parallel_size=args.tensor_parallel_size,
+            max_memory_per_gpu=args.max_memory_per_gpu,
             local_files_only=args.local_files_only,
             torch_dtype=args.torch_dtype,
             seed=args.seed,
@@ -567,6 +689,10 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
             "model_id": args.model_id,
             "tokenizer_id": args.tokenizer_id or args.model_id,
             "device": backend.device,
+            "hf_device_summary": backend.device_summary(),
+            "hf_device_map": args.device_map,
+            "tensor_parallel_size": args.tensor_parallel_size,
+            "max_memory_per_gpu": args.max_memory_per_gpu,
             "context_tokens_requested": args.context_tokens,
             "output_tokens_requested": args.output_tokens,
             "seed": args.seed,

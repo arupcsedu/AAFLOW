@@ -119,6 +119,8 @@ def _multi_llm_config(config: dict[str, Any], output_dir: Path) -> MultiLLMConfi
         sglang_python_bin=str(config_value(config, "sglang_python_bin", default=os.environ.get("SGLANG_PYTHON_BIN", ""))),
         sglang_server_extra_args=str(config_value(config, "sglang_server_extra_args", default="")),
         hf_device=str(config_value(config, "hf_device", default="auto")),
+        hf_device_map=str(config_value(config, "hf_device_map", default="auto")),
+        hf_max_memory_per_gpu=str(config_value(config, "hf_max_memory_per_gpu", default="")),
         hf_local_files_only=bool_default(config_value(config, "hf_local_files_only", default=False)),
         skip_invalid_context=bool_default(config_value(config, "skip_invalid_context", default=True)),
         progress=bool_default(config_value(config, "progress", default=True)),

@@ -285,6 +285,13 @@ stateful_agentic_algebra/configs/paper_experiments/
 
 ## Real LLM Benchmarks
 
+Load the shared environment first so `PYTHON_BIN`, `SGLANG_PYTHON_BIN`,
+`CUDA_HOME`, `CUDA_DEVICE_ORDER`, and Hugging Face cache paths are consistent:
+
+```bash
+source stateful_agentic_algebra/env.sh
+```
+
 Hugging Face KV microbenchmark:
 
 ```bash
@@ -295,6 +302,47 @@ Hugging Face KV microbenchmark:
   --device auto \
   --output-dir runs/stateful/hf_real_gpt2
 ```
+
+HF multi-GPU placement uses Transformers `device_map`. When
+`--tensor-parallel-size` is greater than one, `--device-map auto` resolves to
+`balanced` so the HF model is placed across the visible CUDA devices instead of
+filling GPU 0 first. The run writes `hf_device_summary` into `metrics.json` and
+`results.csv`; use that field plus `nvidia-smi` to verify placement.
+
+HF-only Mistral multi-GPU run:
+
+```bash
+export CUDA_VISIBLE_DEVICES=0,1,2,4
+
+"$PYTHON_BIN" -m stateful_agentic_algebra.multi_llm_runner \
+  --models mistralai/Mistral-7B-Instruct-v0.3 \
+  --backend hf \
+  --context-grid 1024,4096,8192 \
+  --output-grid 64,128 \
+  --agent-grid 2,4,8 \
+  --branch-grid 2,4 \
+  --num-prompts 8 \
+  --tensor-parallel-size 4 \
+  --hf-device auto \
+  --hf-device-map balanced \
+  --output-dir runs/stateful/hf_mistral_7b_tp4
+```
+
+Standalone HF KV measurement across four A100s:
+
+```bash
+export CUDA_VISIBLE_DEVICES=0,1,2,4
+
+"$PYTHON_BIN" -m stateful_agentic_algebra.hf_kv_backend \
+  --model-id mistralai/Mistral-7B-Instruct-v0.3 \
+  --context-tokens 4096 \
+  --output-tokens 64 \
+  --device auto \
+  --device-map balanced \
+  --tensor-parallel-size 4 \
+  --output-dir runs/stateful/hf_mistral_7b_tp4_single
+```
+
 
 vLLM serving benchmark:
 
@@ -323,17 +371,105 @@ SGLang serving benchmark:
   --extra-args --skip-server-warmup
 ```
 
+### Multi-GPU Login Node Runs
+
+If you are running directly on a GPU login/workstation node instead of using
+`sbatch`, first check which GPUs are visible:
+
+```bash
+nvidia-smi --query-gpu=index,name --format=csv,noheader,nounits
+```
+
+On the current DGX login node, the compute GPUs are:
+
+```text
+0, NVIDIA A100-SXM4-80GB
+1, NVIDIA A100-SXM4-80GB
+2, NVIDIA A100-SXM4-80GB
+4, NVIDIA A100-SXM4-80GB
+```
+
+GPU `3` is the `NVIDIA DGX Display` device and should not be used for serving
+benchmarks. Expose only the compute GPUs:
+
+```bash
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
+export CUDA_VISIBLE_DEVICES=0,1,2,4
+```
+
+Then set `--tensor-parallel-size` to the number of exposed compute GPUs. For
+example, vLLM across all four A100s:
+
+```bash
+"$PYTHON_BIN" -m stateful_agentic_algebra.vllm_benchmark \
+  --model-id meta-llama/Meta-Llama-3-8B-Instruct \
+  --input-len 4096 \
+  --output-len 128 \
+  --num-prompts 32 \
+  --request-rate 4 \
+  --tensor-parallel-size 4 \
+  --output-dir runs/stateful/vllm_llama3_8b_tp4
+```
+
+SGLang across all four A100s:
+
+```bash
+"$PYTHON_BIN" -m stateful_agentic_algebra.sglang_benchmark \
+  --model-id mistralai/Mistral-7B-Instruct-v0.3 \
+  --input-len 4096 \
+  --output-len 128 \
+  --num-prompts 32 \
+  --tensor-parallel-size 4 \
+  --python-bin "$SGLANG_PYTHON_BIN" \
+  --output-dir runs/stateful/sglang_mistral_7b_tp4 \
+  --extra-args --skip-server-warmup --mem-fraction-static 0.80
+```
+
+Use `gpt2` as a single-GPU SGLang smoke test. The current SGLang GPT-2 model
+path does not work reliably with `--tensor-parallel-size 4`; for multi-GPU
+serving use a model intended for tensor parallelism such as Mistral, Llama, or
+Qwen.
+
+For quick checks on fewer GPUs, restrict visibility and match tensor
+parallelism:
+
+```bash
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
+export CUDA_VISIBLE_DEVICES=0,1
+--tensor-parallel-size 2
+```
+
+The paper Slurm runner also supports direct login-node execution. In direct
+mode it detects compute GPUs with `nvidia-smi`, excludes display devices, and
+sets `CUDA_VISIBLE_DEVICES` if it is not already set. Control how many local
+GPUs it exposes with:
+
+```bash
+export SAA_LOCAL_GPUS=4
+CONFIG_PATH=stateful_agentic_algebra/configs/paper_experiments/exp1_ttft_reduction_mistral_sglang.yaml \
+  bash stateful_agentic_algebra/slurm/run_paper_experiment.sbatch
+```
+
 Multi-model runner:
 
 ```bash
+export CUDA_VISIBLE_DEVICES=0,1,2,4
+
 "$PYTHON_BIN" -m stateful_agentic_algebra.multi_llm_runner \
-  --config stateful_agentic_algebra/configs/real_llm_full_paper.yaml
+  --config stateful_agentic_algebra/configs/real_llm_full_paper.yaml \
+  --tensor-parallel-size 4 \
+  --hf-device-map balanced \
+  --sglang-python-bin "$SGLANG_PYTHON_BIN" \
+  --sglang-server-extra-args "--skip-server-warmup --mem-fraction-static 0.80 --disable-custom-all-reduce"
 ```
 
 ## Slurm Runs
 
 The Slurm scripts source `stateful_agentic_algebra/env.sh` and honor
-`PYTHON_BIN`, `SGLANG_PYTHON_BIN`, `HF_HOME`, and cache variables.
+`PYTHON_BIN`, `SGLANG_PYTHON_BIN`, `HF_HOME`, cache variables, and optional
+`SAA_SLURM_ACCOUNT`, `SAA_SLURM_PARTITION`, `SAA_SLURM_RESERVATION`, and
+`SAA_SLURM_GRES` defaults. Site-specific Slurm resources are intentionally not
+hardcoded in the scripts.
 
 Single backend/model sweep:
 
@@ -346,7 +482,7 @@ export NUM_PROMPTS='4'
 export TENSOR_PARALLEL_SIZE='2'
 export OUTPUT_DIR='runs/stateful/manual_hf_mistral'
 
-sbatch --partition=bii-gpu --reservation=bi_fox_dgx --export=ALL \
+sbatch -A <account> -p <gpu_partition> --gres=gpu:<gpu_type>:2 --export=ALL \
   stateful_agentic_algebra/slurm/run_real_llm_sweep.sbatch
 ```
 
@@ -484,6 +620,31 @@ Plotting:
   model, or increase tensor parallelism.
 - CUDA not visible on login shell: run inside a Slurm GPU allocation and check
   `nvidia-smi`.
+- SGLang JIT reports `nvcc fatal: Unknown option '--threads=1'` or
+  `Value 'c++20' is not defined`: the server is using the old system CUDA
+  compiler. Reload the project environment and verify CUDA 12.8 is first:
+
+  ```bash
+  source stateful_agentic_algebra/env.sh
+  which nvcc
+  nvcc --version
+  ```
+
+  Expected:
+
+  ```text
+  /raid/arup/cuda-12.8/bin/nvcc
+  Cuda compilation tools, release 12.8
+  ```
+
+  If the error persists, remove stale JIT cache files that were generated with
+  the old compiler:
+
+  ```bash
+  rm -rf ~/.cache/flashinfer/0.6.7.post3/80/cached_ops \
+         ~/.cache/tvm-ffi/sgl_kernel_jit_*
+  ```
+
 - UCX/NCCL unavailable: transport falls back to mock/local simulation.
 - Unsupported vLLM KV export: the wrapper raises `NotImplementedError` for
   unstable KV export/import APIs rather than failing at import time.

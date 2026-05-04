@@ -38,15 +38,23 @@ cd "$PRJ_PATH"
 # Derived by env.sh unless explicitly overridden.
 export PYTHONPATH="$PRJ_PATH:${PYTHONPATH:-}"
 export PYTHON_BIN="$ENV_PATH/saa_vllm_env/bin/python"
-export SGLANG_PYTHON_BIN="$ENV_PATH/drc_rag_bench_env/bin/python"
+export SGLANG_PYTHON_BIN="$ENV_PATH/saa_sglang_env/bin/python"
 ```
 
 Validate the environments before launching a long Slurm job:
 
 ```bash
-$PYTHON_BIN -c "import torch, transformers; print('main ok', torch.__version__)"
+$PYTHON_BIN -c "import torch, transformers, accelerate; print('main ok', torch.__version__)"
 $PYTHON_BIN -c "import vllm; print('vllm ok')"
 $SGLANG_PYTHON_BIN -c "import torch, sglang; print('sglang ok', torch.__version__)"
+```
+
+The Hugging Face multi-GPU path requires `accelerate` because Transformers
+uses it to honor `device_map=balanced`. Install it in the vLLM/HF environment
+if the validation command fails:
+
+```bash
+"$PYTHON_BIN" -m pip install "accelerate>=1.1,<2"
 ```
 
 Set Hugging Face cache directories to scratch before downloading large models.
@@ -207,8 +215,8 @@ Expected real-LLM figure files:
 - Small smoke: CPU or GPU with `gpt2` or `distilgpt2`.
 - 7B models: at least one A100 80GB or H100 is recommended.
 - Larger models: tensor parallelism across multiple GPUs is recommended.
-- On this cluster, request A100 through the `gpu` partition, for example:
-  `sbatch -p gpu --gres=gpu:a100:1 --export=ALL stateful_agentic_algebra/slurm/run_real_llm_sweep.sbatch`.
+- Request A100/H100 resources using your site's Slurm flags, for example:
+  `sbatch -A <account> -p <gpu_partition> --gres=gpu:<gpu_type>:1 --export=ALL stateful_agentic_algebra/slurm/run_real_llm_sweep.sbatch`.
   SGLang serving does not run on V100 here because current SGLang requires
   compute capability sm75 or newer.
 
@@ -227,7 +235,7 @@ export NUM_PROMPTS='2'
 export TENSOR_PARALLEL_SIZE='1'
 export OUTPUT_DIR="$PROJECT_ROOT/runs/stateful/real_llm_multibackend_test"
 
-sbatch -p gpu --gres=gpu:a100:1 --export=ALL \
+sbatch -A <account> -p <gpu_partition> --gres=gpu:<gpu_type>:1 --export=ALL \
   stateful_agentic_algebra/slurm/run_real_llm_sweep.sbatch
 ```
 
@@ -313,7 +321,9 @@ records real serving latency.
 
 ```bash
 python -m stateful_agentic_algebra.multi_llm_runner \
-  --config stateful_agentic_algebra/configs/real_llm_full_paper.yaml
+  --config stateful_agentic_algebra/configs/real_llm_full_paper.yaml \
+  --tensor-parallel-size 4 \
+  --hf-device-map balanced
 ```
 
 Expected outputs:
@@ -416,7 +426,7 @@ The primary output metrics are:
   environment separate, then pass `PYTHON_BIN` and `SGLANG_PYTHON_BIN` to the
   Slurm script.
 - SGLang on V100: current SGLang requires compute capability sm75 or newer on
-  this setup. Request A100 with `-p gpu --gres=gpu:a100:1`.
+  this setup. Request an A100/H100 using your site's Slurm resource flags.
 - SGLang JIT compile error mentioning `<version>`: load `gcc/12.4.0` and
   `cuda/12.8.0`, then set `CC` and `CXX` before launching SGLang.
 - Gated model access: request access on Hugging Face and set

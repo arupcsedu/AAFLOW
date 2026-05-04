@@ -3,10 +3,6 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH -A bii_dsc_community
-#SBATCH --partition=bii-gpu
-#SBATCH --reservation=bi_fox_dgx
-#SBATCH --gres=gpu:a100:1
 #SBATCH --mem=192G
 #SBATCH --time=12:00:00
 #SBATCH --output=slurm-%x-%j.out
@@ -15,21 +11,17 @@
 set -euo pipefail
 export SLURM_CPU_BIND=none
 
-# Override the generic GPU request at submit time for a specific accelerator.
-# On this cluster, A100 nodes are available through the gpu partition:
-#   sbatch -p gpu --gres=gpu:a100:1 ...
+# Resource requests are intentionally supplied at submit time. Example:
+#   sbatch -A <account> -p <partition> --gres=gpu:<type>:1 ...
 
 SAA_ENV_FILE="${SAA_ENV_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/env.sh}"
 if [[ -f "$SAA_ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$SAA_ENV_FILE"
+else
+  echo "Missing Stateful Agentic Algebra env file: $SAA_ENV_FILE" >&2
+  exit 1
 fi
-
-PROJECT_ROOT="${PROJECT_ROOT:-${PRJ_PATH:-/project/bi_dsc_community/drc_rag}}"
-ENV_PATH="${ENV_PATH:-/scratch/${USER}/env}"
-DATA_PATH="${DATA_PATH:-/scratch/${USER}/stateful_aaflow}"
-PYTHON_BIN="${PYTHON_BIN:-$ENV_PATH/saa_vllm_env/bin/python}"
-SGLANG_PYTHON_BIN="${SGLANG_PYTHON_BIN:-$ENV_PATH/drc_rag_bench_env/bin/python}"
 
 MODEL_ID="${MODEL_ID:-gpt2,mistralai/Mistral-7B-Instruct-v0.3,meta-llama/Meta-Llama-3-8B-Instruct}"
 BACKEND="${BACKEND:-hf,vllm,sglang}"
@@ -54,7 +46,6 @@ SGLANG_MAX_PREFILL_TOKENS="${SGLANG_MAX_PREFILL_TOKENS:-}"
 SGLANG_GCC_MODULE="${SGLANG_GCC_MODULE:-gcc/12.4.0}"
 CUDA_MODULE="${CUDA_MODULE:-cuda/12.8.0}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_ROOT/runs/stateful/real_llm_sweep/${SLURM_JOB_ID:-manual}}"
-PLOT_PYTHON_BIN="${PLOT_PYTHON_BIN:-$SGLANG_PYTHON_BIN}"
 GENERATE_PLOTS="${GENERATE_PLOTS:-1}"
 CONFIG_PATH="${CONFIG_PATH:-}"
 
