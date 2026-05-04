@@ -113,6 +113,7 @@ def _multi_llm_config(config: dict[str, Any], output_dir: Path) -> MultiLLMConfi
         vllm_port=int(config_value(config, "vllm_port", default=os.environ.get("VLLM_PORT", 8000))),
         vllm_server_timeout_sec=float(config_value(config, "vllm_server_timeout_sec", default=900.0)),
         vllm_bench_timeout_sec=float(config_value(config, "vllm_bench_timeout_sec", default=1800.0)),
+        vllm_server_extra_args=str(config_value(config, "vllm_server_extra_args", default="")),
         sglang_port=int(config_value(config, "sglang_port", default=os.environ.get("SGLANG_PORT", 30000))),
         sglang_server_timeout_sec=float(config_value(config, "sglang_server_timeout_sec", default=900.0)),
         sglang_bench_timeout_sec=float(config_value(config, "sglang_bench_timeout_sec", default=1800.0)),

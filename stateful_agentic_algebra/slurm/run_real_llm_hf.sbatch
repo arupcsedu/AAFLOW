@@ -31,6 +31,7 @@ AGENT_GRID="${AGENT_GRID:-2}"
 BRANCH_GRID="${BRANCH_GRID:-2}"
 NUM_PROMPTS="${NUM_PROMPTS:-2}"
 TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
+HF_DEVICE_MAP="${HF_DEVICE_MAP:-auto}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_ROOT/runs/stateful/real_llm_hf/${SLURM_JOB_ID:-manual}}"
 
 export HF_HOME="${HF_HOME:-$DATA_PATH/huggingface}"
@@ -61,10 +62,50 @@ mkdir -p "$OUTPUT_DIR/logs" "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_C
 cd "$PROJECT_ROOT"
 export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
 
+LOCAL_GPU_INDICES=""
+if command -v nvidia-smi >/dev/null 2>&1; then
+  LOCAL_GPU_INDICES="$(nvidia-smi --query-gpu=index,name --format=csv,noheader,nounits 2>/dev/null | \
+    awk -F, '
+      {
+        idx=$1; name=$2
+        gsub(/^[ \t]+|[ \t]+$/, "", idx)
+        gsub(/^[ \t]+|[ \t]+$/, "", name)
+        if (name !~ /Display/ && name ~ /(A100|H100|V100|L40|L4|RTX|Tesla|NVIDIA)/) {
+          print idx
+        }
+      }
+    ' | paste -sd, -)"
+fi
+LOCAL_GPU_COUNT=0
+if [[ -n "$LOCAL_GPU_INDICES" ]]; then
+  LOCAL_GPU_COUNT="$(awk -F, '{print NF}' <<<"$LOCAL_GPU_INDICES")"
+fi
+LOCAL_GPU_COUNT="${LOCAL_GPU_COUNT:-0}"
+if [[ -z "${SLURM_JOB_ID:-}" && "$LOCAL_GPU_COUNT" -gt 0 && -z "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+  LOCAL_GPU_LIMIT="${SAA_LOCAL_GPUS:-$LOCAL_GPU_COUNT}"
+  if ! [[ "$LOCAL_GPU_LIMIT" =~ ^[0-9]+$ ]] || [[ "$LOCAL_GPU_LIMIT" -lt 1 ]]; then
+    LOCAL_GPU_LIMIT="$LOCAL_GPU_COUNT"
+  fi
+  if [[ "$LOCAL_GPU_LIMIT" -gt "$LOCAL_GPU_COUNT" ]]; then
+    LOCAL_GPU_LIMIT="$LOCAL_GPU_COUNT"
+  fi
+  export CUDA_VISIBLE_DEVICES="$(cut -d, -f "1-$LOCAL_GPU_LIMIT" <<<"$LOCAL_GPU_INDICES")"
+fi
+
+LAUNCHER=()
+if [[ -n "${SLURM_JOB_ID:-}" && "${SAA_USE_SRUN:-1}" == "1" && -n "$(command -v srun || true)" ]]; then
+  LAUNCHER=(srun --cpu-bind=none --nodes=1 --ntasks=1 --cpus-per-task="${SLURM_CPUS_PER_TASK:-8}")
+fi
+
 echo "Job: ${SLURM_JOB_ID:-manual}" | tee "$OUTPUT_DIR/logs/job_info.log"
 echo "Node list: ${SLURM_NODELIST:-unknown}" | tee -a "$OUTPUT_DIR/logs/job_info.log"
+echo "Launcher: ${LAUNCHER[*]:-direct}" | tee -a "$OUTPUT_DIR/logs/job_info.log"
 echo "Backend: $BACKEND" | tee -a "$OUTPUT_DIR/logs/job_info.log"
 echo "Model: $MODEL_ID" | tee -a "$OUTPUT_DIR/logs/job_info.log"
+echo "TP size: $TENSOR_PARALLEL_SIZE" | tee -a "$OUTPUT_DIR/logs/job_info.log"
+echo "HF device map: $HF_DEVICE_MAP" | tee -a "$OUTPUT_DIR/logs/job_info.log"
+echo "Detected compute GPU indices: ${LOCAL_GPU_INDICES:-none}" | tee -a "$OUTPUT_DIR/logs/job_info.log"
+echo "CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-unset}" | tee -a "$OUTPUT_DIR/logs/job_info.log"
 echo "Output: $OUTPUT_DIR" | tee -a "$OUTPUT_DIR/logs/job_info.log"
 echo "HF_HOME: $HF_HOME" | tee -a "$OUTPUT_DIR/logs/job_info.log"
 
@@ -77,7 +118,7 @@ fi
 
 echo "Running tiny HF smoke test..."
 /usr/bin/time -v \
-  srun --cpu-bind=none --nodes=1 --ntasks=1 --cpus-per-task="${SLURM_CPUS_PER_TASK:-8}" \
+  "${LAUNCHER[@]}" \
   "$PYTHON_BIN" -m stateful_agentic_algebra.multi_llm_runner \
     --models gpt2 \
     --backend hf \
@@ -91,7 +132,7 @@ echo "Running tiny HF smoke test..."
 
 echo "Running HF real LLM sweep..."
 /usr/bin/time -v \
-  srun --cpu-bind=none --nodes=1 --ntasks=1 --cpus-per-task="${SLURM_CPUS_PER_TASK:-8}" \
+  "${LAUNCHER[@]}" \
   "$PYTHON_BIN" -m stateful_agentic_algebra.multi_llm_runner \
     --models "$MODEL_ID" \
     --backend "$BACKEND" \
@@ -101,6 +142,7 @@ echo "Running HF real LLM sweep..."
     --branch-grid "$BRANCH_GRID" \
     --num-prompts "$NUM_PROMPTS" \
     --tensor-parallel-size "$TENSOR_PARALLEL_SIZE" \
+    --hf-device-map "$HF_DEVICE_MAP" \
     --output-dir "$OUTPUT_DIR" \
   >"$OUTPUT_DIR/logs/sweep.out" 2>"$OUTPUT_DIR/logs/sweep.err"
 

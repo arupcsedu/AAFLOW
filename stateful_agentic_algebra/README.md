@@ -459,6 +459,7 @@ export CUDA_VISIBLE_DEVICES=0,1,2,4
   --config stateful_agentic_algebra/configs/real_llm_full_paper.yaml \
   --tensor-parallel-size 4 \
   --hf-device-map balanced \
+  --vllm-server-extra-args "--gpu-memory-utilization 0.75" \
   --sglang-python-bin "$SGLANG_PYTHON_BIN" \
   --sglang-server-extra-args "--skip-server-warmup --mem-fraction-static 0.80 --disable-custom-all-reduce"
 ```

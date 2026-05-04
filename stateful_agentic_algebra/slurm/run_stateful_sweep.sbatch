@@ -74,6 +74,13 @@ echo "Output: $OUTPUT_DIR"
 
 cd "$PROJECT_ROOT"
 
+LAUNCHER=()
+if [[ -n "${SLURM_JOB_ID:-}" && "${SAA_USE_SRUN:-1}" == "1" && -n "$(command -v srun || true)" ]]; then
+  LAUNCHER=(srun --cpu-bind=none --nodes=1 --ntasks=1 --cpus-per-task="${SLURM_CPUS_PER_TASK:-1}")
+fi
+
+echo "Launcher: ${LAUNCHER[*]:-direct}"
+
 cmd=(
   "$PYTHON_BIN" -m stateful_agentic_algebra.experiment_runner
 )
@@ -103,7 +110,7 @@ cmd+=(
 )
 
 /usr/bin/time -v \
-  srun --cpu-bind=none --nodes=1 --ntasks=1 --cpus-per-task="${SLURM_CPUS_PER_TASK:-1}" \
+  "${LAUNCHER[@]}" \
   "${cmd[@]}" \
   >"$OUTPUT_DIR/experiment.out" 2>"$OUTPUT_DIR/time.txt"
 

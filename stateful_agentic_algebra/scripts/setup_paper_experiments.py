@@ -99,6 +99,7 @@ def _config_for(exp_id: int, exp_name: str, model_key: str, model: dict[str, Any
         "omega_text_sec": 0.00005,
         "hf_device": "auto",
         "hf_device_map": "balanced",
+        "vllm_server_extra_args": "--gpu-memory-utilization 0.75",
         "progress": True,
         "skip_invalid_context": True,
         "output_dir": f"runs/stateful/full_paper/{name}",

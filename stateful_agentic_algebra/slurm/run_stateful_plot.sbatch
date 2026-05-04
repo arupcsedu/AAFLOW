@@ -40,10 +40,17 @@ fi
 
 cd "$PROJECT_ROOT"
 
+LAUNCHER=()
+if [[ -n "${SLURM_JOB_ID:-}" && "${SAA_USE_SRUN:-1}" == "1" && -n "$(command -v srun || true)" ]]; then
+  LAUNCHER=(srun --cpu-bind=none --nodes=1 --ntasks=1 --cpus-per-task="${SLURM_CPUS_PER_TASK:-1}")
+fi
+
+echo "Launcher: ${LAUNCHER[*]:-direct}"
+
 if [[ ! -f "$RESULTS_CSV" ]]; then
   echo "No results CSV found at $RESULTS_CSV; running a small mock experiment first."
   /usr/bin/time -v \
-    srun --cpu-bind=none --nodes=1 --ntasks=1 --cpus-per-task="${SLURM_CPUS_PER_TASK:-1}" \
+    "${LAUNCHER[@]}" \
     "$PYTHON_BIN" -m stateful_agentic_algebra.experiment_runner \
       --baseline "$BASELINE" \
       --workload "$WORKLOAD" \
@@ -60,7 +67,7 @@ echo "Plotting: $RESULTS_CSV"
 echo "Figures: $FIGURE_DIR"
 
 /usr/bin/time -v \
-  srun --cpu-bind=none --nodes=1 --ntasks=1 --cpus-per-task="${SLURM_CPUS_PER_TASK:-1}" \
+  "${LAUNCHER[@]}" \
   "$PYTHON_BIN" -m stateful_agentic_algebra.plots \
     --results "$RESULTS_CSV" \
     --output-dir "$FIGURE_DIR" \

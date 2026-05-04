@@ -82,12 +82,25 @@ def launch_vllm_server(
 def wait_for_server(port: int, timeout_sec: float = 600.0, poll_interval_sec: float = 2.0) -> bool:
     """Wait until the vLLM OpenAI-compatible server responds."""
 
+    return wait_for_launched_server(port=port, process=None, timeout_sec=timeout_sec, poll_interval_sec=poll_interval_sec)
+
+
+def wait_for_launched_server(
+    port: int,
+    process: Optional[subprocess.Popen[Any]] = None,
+    timeout_sec: float = 600.0,
+    poll_interval_sec: float = 2.0,
+) -> bool:
+    """Wait until the server responds, returning early if its process exits."""
+
     deadline = time.time() + float(timeout_sec)
     urls = [
         f"http://127.0.0.1:{int(port)}/v1/models",
         f"http://localhost:{int(port)}/v1/models",
     ]
     while time.time() < deadline:
+        if process is not None and process.poll() is not None:
+            return False
         for url in urls:
             try:
                 with urlopen(url, timeout=2.0) as response:
@@ -240,7 +253,7 @@ def run_cli(args: argparse.Namespace) -> int:
             stdout_path=output_dir / "vllm_stdout.log",
             stderr_path=output_dir / "vllm_stderr.log",
         )
-        ready = wait_for_server(args.port, timeout_sec=args.server_timeout_sec)
+        ready = wait_for_launched_server(args.port, process=server, timeout_sec=args.server_timeout_sec)
         if not ready:
             raise RuntimeError(f"vLLM server did not become ready on port {args.port}")
         metrics = run_vllm_bench_serve(

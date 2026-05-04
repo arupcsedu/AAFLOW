@@ -50,7 +50,7 @@ from .sglang_benchmark import (
     wait_for_launched_server as wait_for_sglang_server,
     wait_for_port_release as wait_for_sglang_port_release,
 )
-from .vllm_benchmark import check_vllm_available, run_vllm_bench_serve, launch_vllm_server, wait_for_server
+from .vllm_benchmark import check_vllm_available, run_vllm_bench_serve, launch_vllm_server, wait_for_launched_server
 from .transfer_crossover_real import model_metadata
 
 
@@ -138,6 +138,7 @@ class MultiLLMConfig:
     vllm_port: int = 8000
     vllm_server_timeout_sec: float = 900.0
     vllm_bench_timeout_sec: float = 1800.0
+    vllm_server_extra_args: str = ""
     sglang_port: int = 30000
     sglang_server_timeout_sec: float = 900.0
     sglang_bench_timeout_sec: float = 1800.0
@@ -230,6 +231,10 @@ def run_matrix(config: MultiLLMConfig) -> list[dict[str, Any]]:
                     output_dir=output_dir,
                 )
             elif backend == "vllm":
+                if hf_backend_cache:
+                    hf_backend_cache.clear()
+                    current_hf_model = None
+                    _release_torch_memory()
                 combo_rows = _run_vllm_combo(
                     config=config,
                     model_id=model_id,
@@ -241,6 +246,10 @@ def run_matrix(config: MultiLLMConfig) -> list[dict[str, Any]]:
                     output_dir=output_dir,
                 )
             elif backend == "sglang":
+                if hf_backend_cache:
+                    hf_backend_cache.clear()
+                    current_hf_model = None
+                    _release_torch_memory()
                 combo_rows = _run_sglang_combo(
                     config=config,
                     model_id=model_id,
@@ -641,10 +650,11 @@ def _run_vllm_combo(
             model_id=model_id,
             tensor_parallel_size=config.tensor_parallel_size,
             port=config.vllm_port,
+            extra_args=shlex.split(config.vllm_server_extra_args),
             stdout_path=combo_dir / "vllm_stdout.log",
             stderr_path=combo_dir / "vllm_stderr.log",
         )
-        if not wait_for_server(config.vllm_port, timeout_sec=config.vllm_server_timeout_sec):
+        if not wait_for_launched_server(config.vllm_port, process=server, timeout_sec=config.vllm_server_timeout_sec):
             raise RuntimeError(f"vLLM server did not become ready on port {config.vllm_port}")
         metrics = run_vllm_bench_serve(
             model_id=model_id,
@@ -1843,6 +1853,7 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument("--vllm-port", type=int, default=int(config_value(config, "vllm_port", "vllm-port", default=8000)))
     parser.add_argument("--vllm-server-timeout-sec", type=float, default=float(config_value(config, "vllm_server_timeout_sec", "vllm-server-timeout-sec", default=900.0)))
     parser.add_argument("--vllm-bench-timeout-sec", type=float, default=float(config_value(config, "vllm_bench_timeout_sec", "vllm-bench-timeout-sec", default=1800.0)))
+    parser.add_argument("--vllm-server-extra-args", default=str(config_value(config, "vllm_server_extra_args", "vllm-server-extra-args", default="")))
     parser.add_argument("--sglang-port", type=int, default=int(config_value(config, "sglang_port", "sglang-port", default=30000)))
     parser.add_argument("--sglang-server-timeout-sec", type=float, default=float(config_value(config, "sglang_server_timeout_sec", "sglang-server-timeout-sec", default=900.0)))
     parser.add_argument("--sglang-bench-timeout-sec", type=float, default=float(config_value(config, "sglang_bench_timeout_sec", "sglang-bench-timeout-sec", default=1800.0)))
@@ -1895,6 +1906,7 @@ def config_from_args(args: argparse.Namespace) -> MultiLLMConfig:
         vllm_port=int(args.vllm_port),
         vllm_server_timeout_sec=float(args.vllm_server_timeout_sec),
         vllm_bench_timeout_sec=float(args.vllm_bench_timeout_sec),
+        vllm_server_extra_args=str(args.vllm_server_extra_args),
         sglang_port=int(args.sglang_port),
         sglang_server_timeout_sec=float(args.sglang_server_timeout_sec),
         sglang_bench_timeout_sec=float(args.sglang_bench_timeout_sec),

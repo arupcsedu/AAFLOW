@@ -18,6 +18,7 @@ omega_state_sec: 5e-05
 omega_text_sec: 5e-05
 hf_device: auto
 hf_device_map: balanced
+vllm_server_extra_args: "--gpu-memory-utilization 0.75"
 progress: true
 skip_invalid_context: true
 output_dir: runs/stateful/full_paper/exp6_consistency_llama3_hf
