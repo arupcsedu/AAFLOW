@@ -1,0 +1,8 @@
+model_id,backend,workload_name,rows,available_rows,skipped_rows,mean_ttft_sec,mean_total_latency_sec,mean_throughput_tokens_per_sec,mean_kv_total_bytes
+meta-llama/Meta-Llama-3-8B-Instruct,hf_measured,AAFLOW+,12,12,0,0.03648987164368728,492.0559636054083,232.39900155386007,348127232.0
+meta-llama/Meta-Llama-3-8B-Instruct,hf_measured,aaflow_text,12,12,0,0.345484814962382,4291.359853252458,26.350959468903216,348127232.0
+meta-llama/Meta-Llama-3-8B-Instruct,hf_measured,dense_prefill,12,12,0,0.33938219326240754,4284.069254528222,26.400721430818624,348127232.0
+meta-llama/Meta-Llama-3-8B-Instruct,hf_measured,distserve_style,12,12,0,0.04832619754368728,3945.67135017259,28.989373741385478,348127232.0
+meta-llama/Meta-Llama-3-8B-Instruct,hf_measured,kvcomm_prefix,12,12,0,0.1379956771632522,4049.923865143604,28.119445872471246,348127232.0
+meta-llama/Meta-Llama-3-8B-Instruct,hf_measured,sglang_prefix,12,12,0,0.08075281494057598,3771.6733501650574,30.34360976937778,348127232.0
+meta-llama/Meta-Llama-3-8B-Instruct,hf_measured,vllm_local_prefix,12,12,0,0.10427333607589402,3850.5481649340504,29.720616650820602,348127232.0

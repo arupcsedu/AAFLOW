@@ -1,0 +1,41 @@
+{
+  "agent_grid": [
+    1
+  ],
+  "backend": "sglang",
+  "backends": [
+    "sglang"
+  ],
+  "bandwidth_bytes_per_sec": 25000000000,
+  "branch_grid": [
+    1
+  ],
+  "context_grid": [
+    4096
+  ],
+  "experiment_id": 6,
+  "experiment_name": "consistency",
+  "hf_device": "auto",
+  "hf_device_map": "balanced",
+  "models": [
+    "meta-llama/Meta-Llama-3-8B-Instruct"
+  ],
+  "network_latency_sec": "5e-05",
+  "num_prompts": 8,
+  "omega_state_sec": "5e-05",
+  "omega_text_sec": "5e-05",
+  "output_dir": "runs/stateful/full_paper/exp6_consistency_llama3_sglang",
+  "output_grid": [
+    64
+  ],
+  "progress": true,
+  "resume_overhead_sec": 0.0001,
+  "seed": 7,
+  "seeds": [
+    0
+  ],
+  "sglang_server_extra_args": "--skip-server-warmup --context-length 8192 --max-prefill-tokens 8192",
+  "skip_invalid_context": true,
+  "tensor_parallel_size": 2,
+  "vllm_server_extra_args": "--gpu-memory-utilization 0.75"
+}

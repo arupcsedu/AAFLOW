@@ -1,0 +1,58 @@
+{
+  "agent_grid": [
+    16
+  ],
+  "backend": "sglang",
+  "backends": [
+    "sglang"
+  ],
+  "bandwidth_bytes_per_sec": 25000000000,
+  "bandwidths": [
+    "10Gbps",
+    "25Gbps",
+    "100Gbps",
+    "200Gbps",
+    "400Gbps"
+  ],
+  "branch_grid": [
+    8
+  ],
+  "context_grid": [
+    1024,
+    2048,
+    4096,
+    6144,
+    7680,
+    8128
+  ],
+  "experiment_id": 3,
+  "experiment_name": "transfer_recompute",
+  "hf_device": "auto",
+  "hf_device_map": "balanced",
+  "latencies": [
+    "rdma_10us:10us",
+    "ethernet_100us:100us"
+  ],
+  "metadata_only": false,
+  "models": [
+    "meta-llama/Meta-Llama-3-8B-Instruct"
+  ],
+  "network_latency_sec": "5e-05",
+  "num_prompts": 16,
+  "omega_state_sec": "5e-05",
+  "omega_text_sec": "5e-05",
+  "output_dir": "runs/stateful/full_paper/exp3_transfer_recompute_llama3_sglang",
+  "output_grid": [
+    64
+  ],
+  "output_tokens": 64,
+  "progress": true,
+  "resume_overhead_sec": 0.0001,
+  "seeds": [
+    0
+  ],
+  "sglang_server_extra_args": "--skip-server-warmup --context-length 8192 --max-prefill-tokens 8192",
+  "skip_invalid_context": true,
+  "tensor_parallel_size": 2,
+  "vllm_server_extra_args": "--gpu-memory-utilization 0.75"
+}

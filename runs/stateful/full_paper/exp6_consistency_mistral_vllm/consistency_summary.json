@@ -1,0 +1,16 @@
+{
+  "available_prompts": 8,
+  "exact_match_count": 8,
+  "exact_match_rate": 1.0,
+  "mean_exact_token_match_rate": 1.0,
+  "mean_normalized_edit_distance": 0.0,
+  "mean_output_agreement_rate": 1.0,
+  "num_prompts": 8,
+  "possible_mismatch_causes": [
+    "attention mask",
+    "dtype/numerical nondeterminism",
+    "position ids"
+  ],
+  "skip_reasons": [],
+  "skipped_prompts": 0
+}

@@ -1,0 +1,43 @@
+{
+  "agent_grid": [
+    1,
+    2,
+    4,
+    8,
+    16
+  ],
+  "backend": "hf",
+  "backends": [
+    "hf"
+  ],
+  "bandwidth_bytes_per_sec": 25000000000,
+  "branch_grid": [
+    4
+  ],
+  "context_grid": [
+    4096
+  ],
+  "experiment_id": 2,
+  "experiment_name": "multi_agent_scaling",
+  "hf_device": "auto",
+  "hf_device_map": "balanced",
+  "models": [
+    "meta-llama/Meta-Llama-3-8B-Instruct"
+  ],
+  "network_latency_sec": "5e-05",
+  "num_prompts": 16,
+  "omega_state_sec": "5e-05",
+  "omega_text_sec": "5e-05",
+  "output_dir": "runs/stateful/full_paper/exp2_multi_agent_scaling_llama3_hf",
+  "output_grid": [
+    64
+  ],
+  "progress": true,
+  "resume_overhead_sec": 0.0001,
+  "seeds": [
+    0
+  ],
+  "skip_invalid_context": true,
+  "tensor_parallel_size": 2,
+  "vllm_server_extra_args": "--gpu-memory-utilization 0.75"
+}

@@ -1,0 +1,8 @@
+model_id,backend,workload_name,rows,available_rows,skipped_rows,mean_ttft_sec,mean_total_latency_sec,mean_throughput_tokens_per_sec,mean_kv_total_bytes
+mistralai/Mistral-7B-Instruct-v0.3,hf_measured,AAFLOW+,8,8,0,0.047682978551940265,1103.307042207467,237.62464630351258,2405433344.0
+mistralai/Mistral-7B-Instruct-v0.3,hf_measured,aaflow_text,8,8,0,2.1113354830589923,17176.614210278312,16.95375905415284,2405433344.0
+mistralai/Mistral-7B-Instruct-v0.3,hf_measured,dense_prefill,8,8,0,2.070585775126501,17009.703406586832,17.080403876769658,2405433344.0
+mistralai/Mistral-7B-Instruct-v0.3,hf_measured,distserve_style,8,8,0,0.12946771226194023,9121.002799105252,28.763427105944686,2405433344.0
+mistralai/Mistral-7B-Instruct-v0.3,hf_measured,kvcomm_prefix,8,8,0,0.7258454133542911,11544.67857634457,23.261403872646245,2405433344.0
+mistralai/Mistral-7B-Instruct-v0.3,hf_measured,sglang_prefix,8,8,0,0.29170555694868144,8376.71454455491,31.296544138553685,2405433344.0
+mistralai/Mistral-7B-Instruct-v0.3,hf_measured,vllm_local_prefix,8,8,0,0.45343096030575597,8553.243449629761,30.650616989298324,2405433344.0

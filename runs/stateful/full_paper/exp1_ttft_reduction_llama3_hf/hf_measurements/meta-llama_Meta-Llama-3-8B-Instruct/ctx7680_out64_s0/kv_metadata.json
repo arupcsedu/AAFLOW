@@ -1,0 +1,808 @@
+{
+  "blocks": [
+    {
+      "block_id": "hf_block_0_7f677511",
+      "device": "cuda:0",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 0,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_1_bce2eade",
+      "device": "cuda:0",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 1,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_2_cad04a56",
+      "device": "cuda:0",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 2,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_3_599499d7",
+      "device": "cuda:0",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 3,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_4_4befeaac",
+      "device": "cuda:0",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 4,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_5_3a09eb50",
+      "device": "cuda:0",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 5,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_6_614eede0",
+      "device": "cuda:0",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 6,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_7_f4cbe688",
+      "device": "cuda:0",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 7,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_8_7d2351f9",
+      "device": "cuda:0",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 8,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_9_84921bcd",
+      "device": "cuda:0",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 9,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_10_56ebb625",
+      "device": "cuda:0",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 10,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_11_7ad1bc75",
+      "device": "cuda:0",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 11,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_12_9cef0e5b",
+      "device": "cuda:0",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 12,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_13_545c808f",
+      "device": "cuda:0",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 13,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_14_e0ef8f2b",
+      "device": "cuda:1",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 14,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_15_2a50b20c",
+      "device": "cuda:1",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 15,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_16_d95ee294",
+      "device": "cuda:1",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 16,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_17_f9ee5972",
+      "device": "cuda:1",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 17,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_18_5a237b7f",
+      "device": "cuda:1",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 18,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_19_176bd30f",
+      "device": "cuda:1",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 19,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_20_379c1116",
+      "device": "cuda:1",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 20,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_21_57395ce9",
+      "device": "cuda:1",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 21,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_22_f22645a0",
+      "device": "cuda:1",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 22,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_23_f6b2c1e8",
+      "device": "cuda:1",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 23,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_24_d46af7f2",
+      "device": "cuda:1",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 24,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_25_96d77fbc",
+      "device": "cuda:1",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 25,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_26_d5bbbc8a",
+      "device": "cuda:1",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 26,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_27_8fa8b5b0",
+      "device": "cuda:1",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 27,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_28_409bd9e0",
+      "device": "cuda:1",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 28,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_29_da595c53",
+      "device": "cuda:1",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 29,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_30_2c171c9f",
+      "device": "cuda:1",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 30,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    },
+    {
+      "block_id": "hf_block_31_fb0c8642",
+      "device": "cuda:1",
+      "dtype": "torch.bfloat16",
+      "key_ref": null,
+      "key_shape": [
+        1,
+        8,
+        7744,
+        128
+      ],
+      "layer_id": 31,
+      "nbytes": 31719424,
+      "token_end": 7744,
+      "token_start": 0,
+      "value_ref": null,
+      "value_shape": [
+        1,
+        8,
+        7744,
+        128
+      ]
+    }
+  ],
+  "created_at": 1777952333.6602597,
+  "lineage": [],
+  "metadata": {
+    "actual_context_tokens": 7681,
+    "backend": "hf",
+    "generated_tokens": 64,
+    "hf_device_summary": {
+      "active_cuda_devices": 2,
+      "cuda_device_count": 2,
+      "device": "cuda",
+      "device_map_requested": "balanced",
+      "hf_device_map": {
+        "lm_head": "1",
+        "model.embed_tokens": "0",
+        "model.layers.0": "0",
+        "model.layers.1": "0",
+        "model.layers.10": "0",
+        "model.layers.11": "0",
+        "model.layers.12": "0",
+        "model.layers.13": "0",
+        "model.layers.14": "1",
+        "model.layers.15": "1",
+        "model.layers.16": "1",
+        "model.layers.17": "1",
+        "model.layers.18": "1",
+        "model.layers.19": "1",
+        "model.layers.2": "0",
+        "model.layers.20": "1",
+        "model.layers.21": "1",
+        "model.layers.22": "1",
+        "model.layers.23": "1",
+        "model.layers.24": "1",
+        "model.layers.25": "1",
+        "model.layers.26": "1",
+        "model.layers.27": "1",
+        "model.layers.28": "1",
+        "model.layers.29": "1",
+        "model.layers.3": "0",
+        "model.layers.30": "1",
+        "model.layers.31": "1",
+        "model.layers.4": "0",
+        "model.layers.5": "0",
+        "model.layers.6": "0",
+        "model.layers.7": "0",
+        "model.layers.8": "0",
+        "model.layers.9": "0",
+        "model.norm": "1",
+        "model.rotary_emb": "1"
+      },
+      "input_device": "cuda:0",
+      "max_memory_per_gpu": "",
+      "parameter_device_counts": {
+        "cuda:0": 127,
+        "cuda:1": 164
+      },
+      "tensor_parallel_size": 2
+    },
+    "outputs_match": true,
+    "requested_context_tokens": 7680,
+    "status": "materialized"
+  },
+  "model_config_hash": "d75ee28b7f24fb4d",
+  "model_id": "meta-llama/Meta-Llama-3-8B-Instruct",
+  "owner_device": "cuda",
+  "owner_node": "local",
+  "position_encoding": "llama",
+  "state_id": "hf_kv_da17c8617f9e",
+  "tokenizer_id": "meta-llama/Meta-Llama-3-8B-Instruct"
+}

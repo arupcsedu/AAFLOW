@@ -1,0 +1,46 @@
+{
+  "agent_grid": [
+    16
+  ],
+  "backend": "hf",
+  "backends": [
+    "hf"
+  ],
+  "bandwidth_bytes_per_sec": 25000000000,
+  "branch_grid": [
+    8
+  ],
+  "context_grid": [
+    1024,
+    4096,
+    8192,
+    16384,
+    24576,
+    28672,
+    30720,
+    32640
+  ],
+  "experiment_id": 1,
+  "experiment_name": "ttft_reduction",
+  "hf_device": "auto",
+  "hf_device_map": "balanced",
+  "models": [
+    "mistralai/Mistral-7B-Instruct-v0.3"
+  ],
+  "network_latency_sec": "5e-05",
+  "num_prompts": 32,
+  "omega_state_sec": "5e-05",
+  "omega_text_sec": "5e-05",
+  "output_dir": "runs/stateful/full_paper/exp1_ttft_reduction_mistral_hf",
+  "output_grid": [
+    64
+  ],
+  "progress": true,
+  "resume_overhead_sec": 0.0001,
+  "seeds": [
+    0
+  ],
+  "skip_invalid_context": true,
+  "tensor_parallel_size": 2,
+  "vllm_server_extra_args": "--gpu-memory-utilization 0.75"
+}

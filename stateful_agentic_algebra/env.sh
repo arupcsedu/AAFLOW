@@ -26,7 +26,7 @@ export DATA_PATH="${DATA_PATH:-/scratch/${USER}/stateful_aaflow}"
 # Named environments used by the Slurm scripts. Keep these derived from
 # ENV_PATH unless your site uses separate environment roots.
 export SAA_VLLM_ENV="${SAA_VLLM_ENV:-$ENV_PATH/saa_vllm_env}"
-export SAA_BENCH_ENV="${SAA_BENCH_ENV:-$ENV_PATH/drc_rag_bench_env}"
+export SAA_BENCH_ENV="${SAA_BENCH_ENV:-$ENV_PATH/saa_sglang_env}"
 
 # Optional Slurm submission defaults. Leave these empty for clusters that have
 # suitable defaults, or set them once here and let submit helpers consume them.
@@ -103,10 +103,10 @@ for SAA_CUDA_LIB_DIR in "$CUDA_HOME/lib64" "$CUDA_HOME/lib" "$CUDA_HOME/nvvm/lib
   fi
 done
 if [[ -n "$SAA_CUDA_PATH_PREFIX" || -n "$SAA_CUDA_LD_PREFIX" ]]; then
-  export PATH="$SAA_CUDA_PATH_PREFIX$(dirname "$SGLANG_PYTHON_BIN"):$(dirname "$PYTHON_BIN"):${PATH:-}"
+  export PATH="$SAA_CUDA_PATH_PREFIX$(dirname "$PYTHON_BIN"):$(dirname "$SGLANG_PYTHON_BIN"):${PATH:-}"
   export LD_LIBRARY_PATH="${SAA_CUDA_LD_PREFIX}${SAA_NVIDIA_LIB_PATHS:+:$SAA_NVIDIA_LIB_PATHS}:${LD_LIBRARY_PATH:-}"
 else
-  export PATH="$(dirname "$SGLANG_PYTHON_BIN"):$(dirname "$PYTHON_BIN"):${PATH:-}"
+  export PATH="$(dirname "$PYTHON_BIN"):$(dirname "$SGLANG_PYTHON_BIN"):${PATH:-}"
   if [[ -n "$SAA_NVIDIA_LIB_PATHS" ]]; then
     export LD_LIBRARY_PATH="$SAA_NVIDIA_LIB_PATHS:${LD_LIBRARY_PATH:-}"
   fi

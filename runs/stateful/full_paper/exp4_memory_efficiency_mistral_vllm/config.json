@@ -1,0 +1,43 @@
+{
+  "agent_grid": [
+    8
+  ],
+  "backend": "vllm",
+  "backends": [
+    "vllm"
+  ],
+  "bandwidth_bytes_per_sec": 25000000000,
+  "branch_grid": [
+    1,
+    2,
+    4,
+    8,
+    16
+  ],
+  "context_grid": [
+    8192
+  ],
+  "experiment_id": 4,
+  "experiment_name": "memory_efficiency",
+  "hf_device": "auto",
+  "hf_device_map": "balanced",
+  "models": [
+    "mistralai/Mistral-7B-Instruct-v0.3"
+  ],
+  "network_latency_sec": "5e-05",
+  "num_prompts": 16,
+  "omega_state_sec": "5e-05",
+  "omega_text_sec": "5e-05",
+  "output_dir": "runs/stateful/full_paper/exp4_memory_efficiency_mistral_vllm",
+  "output_grid": [
+    64
+  ],
+  "progress": true,
+  "resume_overhead_sec": 0.0001,
+  "seeds": [
+    0
+  ],
+  "skip_invalid_context": true,
+  "tensor_parallel_size": 2,
+  "vllm_server_extra_args": "--gpu-memory-utilization 0.75"
+}

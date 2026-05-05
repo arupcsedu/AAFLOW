@@ -1,0 +1,9 @@
+model_id,backend,workload_name,rows,available_rows,skipped_rows,mean_ttft_sec,mean_total_latency_sec,mean_throughput_tokens_per_sec,mean_kv_total_bytes
+mistralai/Mistral-7B-Instruct-v0.3,sglang,sglang_serve,5,5,0,1.4997279999999997,18.49205375840029,154.62,0.0
+mistralai/Mistral-7B-Instruct-v0.3,sglang_measured,AAFLOW+,5,5,0,0.08068445092000001,247.94120859763197,93.9430797059272,1073741824.0
+mistralai/Mistral-7B-Instruct-v0.3,sglang_measured,aaflow_text,5,5,0,1.6038145600000004,2487.46129152,10.209852162242052,1073741824.0
+mistralai/Mistral-7B-Instruct-v0.3,sglang_measured,dense_prefill,5,5,0,1.57382,2475.5535360000003,10.258941209173994,1073741824.0
+mistralai/Mistral-7B-Instruct-v0.3,sglang_measured,distserve_style,5,5,0,0.11719167295999999,1920.5753634631678,13.008818968644562,1073741824.0
+mistralai/Mistral-7B-Instruct-v0.3,sglang_measured,kvcomm_prefix,5,5,0,0.5839995200000001,2098.4347315200002,11.978017859797678,1073741824.0
+mistralai/Mistral-7B-Instruct-v0.3,sglang_measured,sglang_prefix,5,5,0,0.3820126275,1826.5976703999993,13.683578241503033,1073741824.0
+mistralai/Mistral-7B-Instruct-v0.3,sglang_measured,vllm_local_prefix,5,5,0,0.4903669624999999,1865.3993791999997,13.392150462568361,1073741824.0

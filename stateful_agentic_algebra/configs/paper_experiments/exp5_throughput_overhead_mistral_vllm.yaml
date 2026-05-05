@@ -11,7 +11,7 @@ output_grid:
   - 128
 seeds:
   - 0
-tensor_parallel_size: 4
+tensor_parallel_size: 2
 bandwidth_bytes_per_sec: 25000000000
 network_latency_sec: 5e-05
 resume_overhead_sec: 0.0001

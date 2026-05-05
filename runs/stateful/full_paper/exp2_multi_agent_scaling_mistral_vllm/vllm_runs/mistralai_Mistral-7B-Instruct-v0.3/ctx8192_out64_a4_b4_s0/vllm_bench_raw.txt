@@ -1,0 +1,52 @@
+INFO 05-05 00:16:49 [scheduler.py:216] Chunked prefill is enabled with max_num_batched_tokens=2048.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x14fa5f8711c0>, seed=0, num_prompts=16, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=8192, random_output_len=64, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='vllm', base_url=None, host='127.0.0.1', port=33000, endpoint='/v1/completions', header=None, max_concurrency=None, model='mistralai/Mistral-7B-Instruct-v0.3', tokenizer='mistralai/Mistral-7B-Instruct-v0.3', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=False, save_detailed=False, append_result=False, metadata=None, result_dir=None, result_filename=None, ignore_eos=True, percentile_metrics=None, metric_percentiles='99', goodput=None, request_id_prefix='bench-941f4ae0-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, tokenizer_mode='auto', served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body=None)
+INFO 05-05 00:16:50 [datasets.py:613] Sampling input_len from [8191, 8191] and output_len from [64, 64]
+Starting initial single prompt test run...
+Waiting for endpoint to become up in 600 seconds
+Initial test run completed.
+Starting main benchmark run...
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: None
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     16        
+Failed requests:                         0         
+Benchmark duration (s):                  6.91      
+Total input tokens:                      131056    
+Total generated tokens:                  1024      
+Request throughput (req/s):              2.32      
+Output token throughput (tok/s):         148.18    
+Peak output token throughput (tok/s):    593.00    
+Peak concurrent requests:                16.00     
+Total Token throughput (tok/s):          19113.24  
+---------------Time to First Token----------------
+Mean TTFT (ms):                          3249.91   
+Median TTFT (ms):                        3091.32   
+P99 TTFT (ms):                           6176.97   
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          53.74     
+Median TPOT (ms):                        56.31     
+P99 TPOT (ms):                           92.65     
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           53.74     
+Median ITL (ms):                         13.24     
+P99 ITL (ms):                            118.49    
+==================================================
+
+/scratch/djy8hg/env/saa_vllm_env/lib/python3.11/site-packages/transformers/utils/hub.py:110: FutureWarning: Using `TRANSFORMERS_CACHE` is deprecated and will be removed in v5 of Transformers. Use `HF_HOME` instead.
+  warnings.warn(
+/scratch/djy8hg/env/saa_vllm_env/lib/python3.11/site-packages/vllm/benchmarks/serve.py:1352: FutureWarning: It is strongly recommended to run mistral models with `--tokenizer-mode "mistral"` to ensure correct encoding and decoding.
+  tokenizer = get_tokenizer(
+
+ |          | 00:00 elapsed, ? remaining
+ |          | 00:00 elapsed, 00:06 remaining
+ |          | 00:00 elapsed, 147:05:11 remaining
+
+  0%|          | 0/16 [00:00<?, ?it/s]
+  6%|▋         | 1/16 [00:06<01:34,  6.32s/it]
+ 19%|█▉        | 3/16 [00:06<00:21,  1.68s/it]
+ 44%|████▍     | 7/16 [00:06<00:05,  1.77it/s]
+ 62%|██████▎   | 10/16 [00:06<00:02,  2.91it/s]
+ 81%|████████▏ | 13/16 [00:06<00:00,  4.38it/s]
+100%|██████████| 16/16 [00:06<00:00,  2.32it/s]

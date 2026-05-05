@@ -91,7 +91,7 @@ def _config_for(exp_id: int, exp_name: str, model_key: str, model: dict[str, Any
         "backend": backend,
         "output_grid": [64],
         "seeds": [0],
-        "tensor_parallel_size": 4,
+        "tensor_parallel_size": 2,
         "bandwidth_bytes_per_sec": 25_000_000_000,
         "network_latency_sec": 0.00005,
         "resume_overhead_sec": 0.0001,

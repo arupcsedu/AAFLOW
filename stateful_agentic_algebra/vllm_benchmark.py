@@ -32,7 +32,7 @@ from urllib.request import urlopen
 def check_vllm_available() -> bool:
     """Return True when the vLLM CLI or Python package appears available."""
 
-    return shutil.which("vllm") is not None or importlib.util.find_spec("vllm") is not None
+    return _vllm_cli_base_or_none() is not None
 
 
 def launch_vllm_server(
@@ -302,12 +302,54 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
 
 
 def _vllm_cli_base() -> list[str]:
+    command = _vllm_cli_base_or_none()
+    if command is not None:
+        return command
+    raise RuntimeError("vLLM is not installed or no vLLM CLI is available")
+
+
+def _vllm_cli_base_or_none() -> Optional[list[str]]:
+    """Return a vLLM CLI command, preferring the configured Python venv.
+
+    Slurm jobs source `env.sh`, where `PYTHON_BIN` points at the vLLM
+    environment. Some clusters also have a stale or partial `vllm` executable
+    earlier in PATH, so using `python -m vllm.entrypoints.cli.main` avoids
+    accidentally launching the server from the wrong virtual environment.
+    """
+
+    candidates = [os.environ.get("PYTHON_BIN"), sys.executable]
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        python = str(Path(candidate))
+        if python in seen or not Path(python).exists():
+            continue
+        seen.add(python)
+        if _python_can_import_vllm(python):
+            return [python, "-m", "vllm.entrypoints.cli.main"]
+
     executable = shutil.which("vllm")
     if executable:
         return [executable]
     if importlib.util.find_spec("vllm") is not None:
         return [sys.executable, "-m", "vllm.entrypoints.cli.main"]
-    raise RuntimeError("vLLM is not installed or no vLLM CLI is available")
+    return None
+
+
+def _python_can_import_vllm(python: str) -> bool:
+    try:
+        proc = subprocess.run(
+            [python, "-c", "import importlib.util; raise SystemExit(0 if importlib.util.find_spec('vllm') else 1)"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=20.0,
+            check=False,
+        )
+    except Exception:
+        return False
+    return proc.returncode == 0
 
 
 def _terminate_process_tree(process: subprocess.Popen[Any], timeout_sec: float = 30.0) -> None:

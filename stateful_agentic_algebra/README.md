@@ -42,37 +42,24 @@ module adds a separate state-aware layer:
 - If AAFLOW imports fail, this module still runs in standalone mock mode.
 
 ## Environment Setup
-
-Use `stateful_agentic_algebra/env.sh` as the single local path file. New users
-should change only these three variables inside that file for a different checkout, environment
-root, or scratch/cache location:
+You need to install python >= 3.11 to run this experiment. If you have preloaded module like miniforge or anaconda which have python 3.11, you can module load it or check you default python version:
 
 ```bash
-export PRJ_PATH=/raid/${USER}/drc_rag #Change it for your project home directory
-source "$PRJ_PATH/stateful_agentic_algebra/env.sh"
-cd "$PRJ_PATH"
-export PYTHONPATH="$PRJ_PATH:${PYTHONPATH:-}"
+module load miniforge/24.3.0-py3.11
+python --version
+```
+
+## Set project PATH and Environment path.
+
+```bash
+export PRJ_PATH=/project/bi_dsc_community/drc_rag #Change it for your project home directory
+export ENV_PATH="${ENV_PATH:-/scratch/${USER}/env}"
 ```
 
 
-`env.sh` derives:
+## Create vLLM/HF Environment: `saa_vllm_env`
 
-- `SAA_VLLM_ENV=$ENV_PATH/saa_vllm_env`
-- `SAA_BENCH_ENV=$ENV_PATH/saa_sglang_env` 
-- `PYTHON_BIN=$SAA_VLLM_ENV/bin/python`
-- `SGLANG_PYTHON_BIN=$SAA_BENCH_ENV/bin/python`
-- `PLOT_PYTHON_BIN=$SGLANG_PYTHON_BIN`
-- `HF_HOME=$DATA_PATH/huggingface`
-- `HUGGINGFACE_HUB_CACHE=$HF_HOME/hub`
-- `TRANSFORMERS_CACHE=$HF_HOME/transformers`
-
-For a clean third-party setup, create a dedicated SGLang environment named
-`saa_sglang_env` and point `SAA_BENCH_ENV` to it which is defined in the `stateful_agentic_algebra/env.sh`.  create `saa_sglang_env` for a cleaner new install for slurm run.
-
-## vLLM/HF Environment: `saa_vllm_env`
-
-Use `saa_vllm_env` for Hugging Face KV measurements and vLLM serving
-benchmarks.
+Use `saa_vllm_env` for Hugging Face KV measurements and vLLM serving benchmarks.
 
 Create or recreate it:
 
@@ -84,10 +71,7 @@ python -m pip install -U pip setuptools wheel
 python -m pip install -r stateful_agentic_algebra/requirements.txt
 ```
 
-The requirements file is a full `pip freeze --all` snapshot of the working
-vLLM/HF stack. It is large because it includes CUDA/PyTorch/vLLM wheels. For
-mock-only runs, skip this environment and use the lightweight mock instructions
-below.
+The requirements file is a full `pip freeze --all` snapshot of the working vLLM/HF stack. It is large because it includes CUDA/PyTorch/vLLM wheels. For mock-only runs, skip this environment and use the lightweight mock instructions below.
 
 Verify `saa_vllm_env`:
 
@@ -117,19 +101,17 @@ cuda_available: True
 cuda_device_count: 5
 ```
 
-`cuda_available=False` is expected on login shells without a GPU allocation.
-Inside an A100/H100 Slurm allocation, CUDA should be visible. Install
-`matplotlib` into `saa_vllm_env` only if you want this same interpreter to
-generate figures:
+`cuda_available=False` is expected on login shells without a GPU allocation. Inside an A100/H100 Slurm allocation, CUDA should be visible. Install `matplotlib` into `saa_vllm_env` only if you want this same interpreter to generate figures:
 
 ```bash
-"$ENV_PATH/saa_vllm_env/bin/python" -m pip install matplotlib
+"$ENV_PATH/saa_vllm_env/bin/python"   
 ```
 
-## SGLang Environment: `saa_sglang_env`
+For a clean third-party setup, create a dedicated SGLang environment named `saa_sglang_env` and point `SAA_BENCH_ENV` to it which is defined in the `stateful_agentic_algebra/env.sh`.  create `saa_sglang_env` for a cleaner new install for slurm run.
 
-SGLang and vLLM often require different pinned CUDA/PyTorch packages. Keep
-SGLang in a separate environment.
+## Create SGLang Environment: `saa_sglang_env`
+
+SGLang and vLLM often require different pinned CUDA/PyTorch packages. Keep SGLang in a separate environment.
 
 Create a clean SGLang environment:
 
@@ -140,6 +122,7 @@ python3 -m venv "$ENV_PATH/saa_sglang_env"
 source "$ENV_PATH/saa_sglang_env/bin/activate"
 python -m pip install -U pip setuptools wheel
 python -m pip install -r stateful_agentic_algebra/slang_requirements.txt
+python -m pip install matplotlib
 ```
 
 Then use it with the shared path setup:
@@ -149,9 +132,28 @@ export SAA_BENCH_ENV="$ENV_PATH/saa_sglang_env"
 export SGLANG_PYTHON_BIN="$SAA_BENCH_ENV/bin/python"
 ```
 
+***Important** Use `stateful_agentic_algebra/env.sh` as the single local path file. New users should change only those  variables inside that file for a different checkout, environment root, or scratch/cache location:
+
+```bash
+source "$PRJ_PATH/stateful_agentic_algebra/env.sh"
+cd "$PRJ_PATH"
+export PYTHONPATH="$PRJ_PATH:${PYTHONPATH:-}"
+```
+
+`env.sh` derives:
+
+- `SAA_VLLM_ENV=$ENV_PATH/saa_vllm_env`
+- `SAA_BENCH_ENV=$ENV_PATH/saa_sglang_env` 
+- `PYTHON_BIN=$SAA_VLLM_ENV/bin/python`
+- `SGLANG_PYTHON_BIN=$SAA_BENCH_ENV/bin/python`
+- `PLOT_PYTHON_BIN=$SGLANG_PYTHON_BIN`
+- `HF_HOME=$DATA_PATH/huggingface`
+- `HUGGINGFACE_HUB_CACHE=$HF_HOME/hub`
+- `TRANSFORMERS_CACHE=$HF_HOME/transformers`
 
 SGLang JIT compilation needs a modern host compiler on this cluster:
 
+Install gcc/12.4.0 cuda/12.8.0 if you don't have preloaded module.
 ```bash
 module load gcc/12.4.0 cuda/12.8.0 
 export CC=$(command -v gcc)
@@ -159,7 +161,6 @@ export CXX=$(command -v g++)
 export SGLANG_SERVER_EXTRA_ARGS='--skip-server-warmup'
 ```
 
-Install gcc/12.4.0 cuda/12.8.0 if you don't have preloaded module.
 
 Verify the SGLang environment:
 
@@ -505,6 +506,9 @@ That helper submits every script under
 writes its own `benchmark.out`, `summary.out`, CSV/JSON results, and figures
 under the configured `runs/stateful/full_paper/...` directory.
 
+The generated paper configs set `tensor_parallel_size: 2`, matching
+`gpu:a100:2`. If you request four GPUs, update the paper configs or regenerate
+them with the matching tensor-parallel size before submitting.
 
 For comma-separated grids, export variables first and use `--export=ALL`; do
 not put comma-separated values directly inside `sbatch --export=...`.
