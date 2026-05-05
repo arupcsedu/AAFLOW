@@ -18,8 +18,10 @@ else
   echo "Missing Stateful Agentic Algebra env file: $SAA_ENV_FILE" >&2
   exit 1
 fi
+export SAA_ENV_FILE PROJECT_ROOT PRJ_PATH
 
 SBATCH_ARGS=()
+SBATCH_EXPORT="ALL,SAA_ENV_FILE=$SAA_ENV_FILE,PROJECT_ROOT=$PROJECT_ROOT,PRJ_PATH=$PRJ_PATH"
 if [[ -n "${SAA_SLURM_ACCOUNT:-}" ]]; then
   SBATCH_ARGS+=(-A "$SAA_SLURM_ACCOUNT")
 fi
@@ -32,6 +34,7 @@ fi
 if [[ -n "${SAA_SLURM_GRES:-}" ]]; then
   SBATCH_ARGS+=(--gres="$SAA_SLURM_GRES")
 fi
+SBATCH_ARGS+=(--export="$SBATCH_EXPORT")
 SBATCH_EXTRA_ARGS="${SBATCH_EXTRA_ARGS:-}"
 
 for script in "$SCRIPT_DIR"/run_exp*.sbatch; do

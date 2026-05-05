@@ -483,9 +483,28 @@ export NUM_PROMPTS='4'
 export TENSOR_PARALLEL_SIZE='2'
 export OUTPUT_DIR='runs/stateful/manual_hf_mistral'
 
-sbatch -A <account> -p <gpu_partition> --gres=gpu:<gpu_type>:2 --export=ALL \
-  stateful_agentic_algebra/slurm/run_real_llm_sweep.sbatch
+sbatch -A bii_dsc_community -p bii-gpu --gres=gpu:a100:2 \
+  --reservation=bi_fox_dgx --export=ALL \
+  stateful_agentic_algebra/slurm/run_paper_experiment.sbatch
 ```
+
+Submit the full paper matrix, 6 experiments x 2 models x 3 backends:
+
+```bash
+source stateful_agentic_algebra/env.sh
+export SAA_SLURM_ACCOUNT='bii_dsc_community'
+export SAA_SLURM_PARTITION='bii-gpu'
+export SAA_SLURM_RESERVATION='bi_fox_dgx'
+export SAA_SLURM_GRES='gpu:a100:2'
+
+bash stateful_agentic_algebra/slurm/paper_experiments/submit_all.sh
+```
+
+That helper submits every script under
+`stateful_agentic_algebra/slurm/paper_experiments/run_exp*.sbatch`. Each job
+writes its own `benchmark.out`, `summary.out`, CSV/JSON results, and figures
+under the configured `runs/stateful/full_paper/...` directory.
+
 
 For comma-separated grids, export variables first and use `--export=ALL`; do
 not put comma-separated values directly inside `sbatch --export=...`.

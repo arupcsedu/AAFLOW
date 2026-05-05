@@ -11,7 +11,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SAA_ENV_FILE="${SAA_ENV_FILE:-$(cd "$SCRIPT_DIR/../.." && pwd)/env.sh}"
+if [[ -z "${SAA_ENV_FILE:-}" ]]; then
+  if [[ -n "${SLURM_SUBMIT_DIR:-}" && -f "$SLURM_SUBMIT_DIR/stateful_agentic_algebra/env.sh" ]]; then
+    SAA_ENV_FILE="$SLURM_SUBMIT_DIR/stateful_agentic_algebra/env.sh"
+  else
+    SAA_ENV_FILE="$(cd "$SCRIPT_DIR/../.." && pwd)/env.sh"
+  fi
+fi
 if [[ -f "$SAA_ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$SAA_ENV_FILE"
