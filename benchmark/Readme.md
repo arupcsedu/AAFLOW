@@ -12,6 +12,9 @@ Final compared implementations:
 
 The benchmark keeps the comparison apples-to-apples: all methods use the same corpus, same model, same chunk count, same embedding token limit, same generation token limit, and same batch sizes.
 
+#Notes
+There are two different project paths with different names in this document, /scratch/djy8hg/workdir/AAFLOW/ and /project/bi_dsc_community/drc_rag. The first one is used to implement GPU-based benchmarking, and the second one is used for CPU-based benchmarking. Both directories are basically the same and cloned to different locations.
+
 ## GPU Benchmark Implementation
 
 Main files:
@@ -184,7 +187,7 @@ Updated for Sets 1 through 9
 
 This benchmark compares multiple ingestion strategies over the same synthetic corpus and the same simulated embedding model. The main script is:
 
-`/project/bi_dsc_community/AAFLOW/benchmark/benchmark_configs_1_to_5.py`
+`/project/bi_dsc_community/drc_rag/benchmark/benchmark_configs_1_to_5.py`
 
 It reports:
 
