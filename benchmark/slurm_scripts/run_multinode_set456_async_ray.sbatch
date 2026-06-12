@@ -4,7 +4,8 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=37
 #SBATCH -A bii_dsc_community
-#SBATCH --partition=parallel     # change to your cluster's partition
+#SBATCH --partition=bii-gpu
+#SBATCH --reservation=bi_fox_dgx
 #SBATCH --mem=256G
 #SBATCH --time=02:00:00
 #SBATCH --output=/project/bi_dsc_community/drc_rag/benchmark/slurm-%x-%j.out
