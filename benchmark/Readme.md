@@ -10,7 +10,7 @@ Final compared implementations:
 - `HigressRAG`
 - `AAFLOW`
 
-The final AAFLOW path uses length-bucketed compiled embedding graphs, CUDA graph replay, FAISS overlap, and FlashAttention 2 under the Hugging Face backend. The benchmark keeps the comparison apples-to-apples: all methods use the same corpus, same model, same chunk count, same embedding token limit, same generation token limit, and same batch sizes.
+The benchmark keeps the comparison apples-to-apples: all methods use the same corpus, same model, same chunk count, same embedding token limit, same generation token limit, and same batch sizes.
 
 ## GPU Benchmark Implementation
 
@@ -174,8 +174,6 @@ AAFLOW improvement:
 ## Notes
 
 - `Total(s)` excludes `optimization_setup_s_max`; setup time is reported separately in `summary.csv` and `summary.json`.
-- FlashAttention improves steady-state embedding throughput but adds compile/setup overhead. Use steady-state totals for repeated benchmark comparisons and setup-inclusive totals for cold-start analysis.
-- `benchmark.out` intentionally omits `TTFT(s)` for a cleaner table. Use `summary.csv` or `summary.json` for TTFT analysis.
 
 ---
 
@@ -186,7 +184,7 @@ Updated for Sets 1 through 9
 
 This benchmark compares multiple ingestion strategies over the same synthetic corpus and the same simulated embedding model. The main script is:
 
-`/project/bi_dsc_community/drc_rag/benchmark/benchmark_configs_1_to_5.py`
+`/project/bi_dsc_community/AAFLOW/benchmark/benchmark_configs_1_to_5.py`
 
 It reports:
 
