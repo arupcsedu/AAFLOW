@@ -1,0 +1,8 @@
+{
+  "rank": 0,
+  "model_load_s": 4.254130026092753,
+  "corpus_prep_s": 0.0043452458921819925,
+  "compiled_embed_setup_s": 7.57777565298602,
+  "cuda_visible_devices": "0",
+  "attn_implementation": "flash_attention_2"
+}
