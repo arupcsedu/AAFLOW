@@ -7,6 +7,8 @@
 #SBATCH --time=02:00:00
 #SBATCH --output=/project/bi_dsc_community/drc_rag/benchmark/slurm-%x-%j.out
 #SBATCH --error=/project/bi_dsc_community/drc_rag/benchmark/slurm-%x-%j.err
+#SBATCH --partition=bii-gpu
+#SBATCH --reservation=bi_fox_dgx
 
 set -euo pipefail
 export SLURM_CPU_BIND=none

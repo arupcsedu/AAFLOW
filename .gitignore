@@ -59,6 +59,8 @@ cover/
 *.out
 *.pyc
 *.*.pyc
+benchmark/slurm_runs_hf_models/
+benchmark/slurm_runs_hf_weak_scaling/
 
 
 # Django stuff:

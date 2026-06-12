@@ -11,6 +11,8 @@ dependencies:
       - pyarrow>=16,<22
       - torch>=2.4,<3
       - transformers>=4.45,<5
+      - accelerate>=1,<2
+      - sentencepiece>=0.2,<1
       - datasets>=3,<5
       - chromadb>=1,<2
       - faiss-cpu>=1.8,<2
@@ -20,6 +22,6 @@ dependencies:
       - distributed>=2024.8,<2027
       - langchain-core>=0.3,<1
       - langgraph>=0.2,<1
-        - crewai>=0.130,<1
-        - pyautogen>=0.2,<1
-        - autogen>=0.12,<1
+      - crewai>=0.130,<1
+      - pyautogen>=0.2,<1
+      - autogen>=0.12,<1
