@@ -1,0 +1,27 @@
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00, 141.17it/s]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00, 141.59it/s]
+The following generation flags are not valid and may be ignored: ['temperature', 'top_p']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+The following generation flags are not valid and may be ignored: ['temperature', 'top_p']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+	Command being timed: "srun --nodes=1 --ntasks=2 --cpus-per-task=8 --gpus-per-task=1 --gpu-bind=single:1 --cpu-bind=cores /scratch/djy8hg/env/drc_rag_benchmarks_flashattn/bin/python /scratch/djy8hg/workdir/AAFLOW/framework_rag_pipeline_benchmark/distributed_hf_framework_benchmark.py --model llama3-8b --chunks-per-gpu 16000 --files-per-gpu 64 --chunk-chars 900 --embed-batch-size 64 --aaflow-embed-batch-size 128 --upsert-batch-size 32 --generation-batch-size 16 --generation-samples-per-gpu 64 --max-input-tokens 128 --max-new-tokens 32 --dtype bfloat16 --attn-implementation flash_attention_2 --hf-cache-dir /scratch/djy8hg/huggingface --run-dir /scratch/djy8hg/workdir/AAFLOW/framework_rag_pipeline_benchmark/slurm_runs_hf_framework/15245798/llama3-8b_2gpu --corpus-root /scratch/djy8hg/aaflow_data/hf_wikitext103_2gpu_16000x900 --aaflow-tokenizer-prefetch --aaflow-compile-mode default"
+	User time (seconds): 0.01
+	System time (seconds): 0.00
+	Percent of CPU this job got: 0%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 12:54.98
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 10392
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 2
+	Minor (reclaiming a frame) page faults: 1242
+	Voluntary context switches: 134
+	Involuntary context switches: 0
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 16
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
