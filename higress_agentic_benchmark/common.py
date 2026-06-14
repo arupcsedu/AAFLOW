@@ -40,6 +40,7 @@ class QueryCase:
 
 @dataclass
 class RetrievalHit:
+    chunk_id: str
     text: str
     metadata: Dict[str, str]
     dense_score: float
@@ -61,6 +62,7 @@ class QueryMetrics:
     total_ms: float
     tokens_generated: int
     answer_preview: str
+    hit_ids: List[str] = field(default_factory=list)
 
 
 class Timer:
@@ -214,6 +216,7 @@ class HybridRetriever:
             chunk = self.chunks[idx]
             hits.append(
                 RetrievalHit(
+                    chunk_id=chunk.chunk_id,
                     text=chunk.text,
                     metadata=chunk.metadata,
                     dense_score=float(dense_score),

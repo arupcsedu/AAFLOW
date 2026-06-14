@@ -1,3 +1,4 @@
+import math
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -20,6 +21,7 @@ from .common import (
     SemanticCache,
     TinyLocalLLM,
     Timer,
+    tokenize,
 )
 @dataclass
 class EngineConfig:
@@ -37,6 +39,8 @@ class EngineConfig:
     memory_top_k_stm: int = 4
     memory_top_k_ltm: int = 4
     memory_top_k_em: int = 2
+    aaflow_plus_batch_size: int = 0
+    aaflow_plus_dense_candidates: int = 0
 class BaseBenchmarkEngine:
     def __init__(self, name: str, chunks: Sequence[CorpusChunk], llm, config: EngineConfig):
         self.name = name
@@ -118,8 +122,13 @@ class BaseBenchmarkEngine:
             total_ms=total_timer.elapsed_ms,
             tokens_generated=tokens_generated,
                         answer_preview=answer[:120].replace("\n", " "),
+            hit_ids=[hit.chunk_id for hit in hits] if not cache_hit else [],
         )
 class HigressRAGEngine(BaseBenchmarkEngine):
+    def _batch_size(self) -> int:
+        workers = max(1, self.config.physical_workers or 1)
+        return max(4, min(32, workers // 8 or 8))
+
     def _dispatch_overhead(self) -> None:
         if self.config.benchmark_mode != "fair_parallelism_plus_overlap":
             return
@@ -172,7 +181,115 @@ class HigressRAGEngine(BaseBenchmarkEngine):
             total_ms=total_timer.elapsed_ms,
             tokens_generated=tokens_generated,
                         answer_preview=answer[:120].replace("\n", " "),
+            hit_ids=[hit.chunk_id for hit in hits] if not cache_hit else [],
         )
+
+    def run_queries(self, scenario: str, cases: Sequence[QueryCase]) -> List[QueryMetrics]:
+        if self.config.benchmark_mode != "fair_parallelism_plus_overlap":
+            return super().run_queries(scenario, cases)
+        if not hasattr(self.llm, "generate_batch"):
+            return [self.run_query(scenario, case) for case in cases]
+
+        rows: List[QueryMetrics] = []
+        case_list = list(cases)
+        batch_size = self._batch_size()
+        for start in range(0, len(case_list), batch_size):
+            batch = case_list[start : start + batch_size]
+            if not batch:
+                continue
+
+            query_embeddings = [self.embedder.embed_query(case.query) for case in batch]
+            cache_times = []
+            cache_hits = []
+            cached_answers = []
+            for case, query_embedding in zip(batch, query_embeddings):
+                with Timer() as cache_timer:
+                    cache_hit = False
+                    cached_answer = None
+                    if case.allow_cache:
+                        cache_hit, cached_answer, _ = self._lookup_cache(case.query, query_embedding)
+                cache_times.append(cache_timer.elapsed_ms)
+                cache_hits.append(cache_hit)
+                cached_answers.append(cached_answer or "")
+
+            miss_indices = [idx for idx, hit in enumerate(cache_hits) if not hit]
+            hits_by_index = {}
+            contexts_by_index = {}
+            answers_by_index = {}
+            tokens_by_index = {}
+            retrieval_avg_ms = 0.0
+            llm_avg_ms = 0.0
+            memory_store_avg_ms = 0.0
+
+            if miss_indices:
+                with Timer() as retrieval_timer:
+                    for idx in miss_indices:
+                        self._dispatch_overhead()
+                        hits, context, _ = self._retrieve(
+                            batch[idx].query,
+                            query_embeddings[idx],
+                        )
+                        hits_by_index[idx] = hits
+                        contexts_by_index[idx] = context
+                retrieval_avg_ms = retrieval_timer.elapsed_ms / len(miss_indices)
+
+                if scenario != "retrieval_hybrid":
+                    with Timer() as generation_timer:
+                        self._dispatch_overhead()
+                        generated_rows = self.llm.generate_batch(
+                            [(batch[idx].query, contexts_by_index[idx]) for idx in miss_indices]
+                        )
+                    llm_avg_ms = generation_timer.elapsed_ms / len(miss_indices)
+                    for idx, (answer, tokens_generated) in zip(miss_indices, generated_rows):
+                        answers_by_index[idx] = answer
+                        tokens_by_index[idx] = tokens_generated
+                else:
+                    for idx in miss_indices:
+                        answers_by_index[idx] = contexts_by_index[idx][:240]
+                        tokens_by_index[idx] = 0
+
+                with Timer() as store_timer:
+                    for idx in miss_indices:
+                        answer = answers_by_index[idx]
+                        if batch[idx].allow_cache:
+                            self.semantic_cache.put(
+                                batch[idx].query,
+                                answer,
+                                query_embedding=query_embeddings[idx],
+                            )
+                        memory_store_avg_ms += self._post_answer(
+                            batch[idx].query,
+                            answer,
+                            query_embeddings[idx],
+                            hits_by_index[idx],
+                        )
+                memory_store_avg_ms = memory_store_avg_ms / len(miss_indices)
+
+            batch_total_avg_ms = sum(cache_times) / len(batch)
+            if miss_indices:
+                batch_total_avg_ms += retrieval_avg_ms + llm_avg_ms + memory_store_avg_ms
+
+            for idx, case in enumerate(batch):
+                cache_hit = cache_hits[idx]
+                answer = cached_answers[idx] if cache_hit else answers_by_index.get(idx, "")
+                rows.append(
+                    QueryMetrics(
+                        engine=self.name,
+                        scenario=scenario,
+                        query_id=case.query_id,
+                        cache_hit=cache_hit,
+                        semantic_cache_lookup_ms=cache_times[idx],
+                        retrieval_ms=0.0 if cache_hit else retrieval_avg_ms,
+                        memory_load_ms=0.0,
+                        memory_store_ms=0.0 if cache_hit else memory_store_avg_ms,
+                        llm_generation_ms=0.0 if cache_hit or scenario == "retrieval_hybrid" else llm_avg_ms,
+                        total_ms=cache_times[idx] if cache_hit else batch_total_avg_ms,
+                        tokens_generated=0 if cache_hit else tokens_by_index.get(idx, 0),
+                        answer_preview=answer[:120].replace("\n", " "),
+                        hit_ids=[hit.chunk_id for hit in hits_by_index.get(idx, [])] if not cache_hit else [],
+                    )
+                )
+        return rows
 class AAFLOWEngine(BaseBenchmarkEngine):
     def __init__(self, chunks: Sequence[CorpusChunk], llm, config: EngineConfig):
         super().__init__(name="AAFLOW", chunks=chunks, llm=llm, config=config)
@@ -295,6 +412,7 @@ class AAFLOWEngine(BaseBenchmarkEngine):
             total_ms=total_timer.elapsed_ms,
             tokens_generated=tokens_generated,
                         answer_preview=answer[:120].replace("\n", " "),
+            hit_ids=[hit.chunk_id for hit in hits] if not cache_hit else [],
         )
 class AAFLOWPlusEngine(AAFLOWEngine):
     def __init__(self, chunks: Sequence[CorpusChunk], llm, config: EngineConfig):
@@ -302,9 +420,13 @@ class AAFLOWPlusEngine(AAFLOWEngine):
         import pyarrow as pa
         self.pa = pa
         self.name = "AAFLOW+"
+
     def _batch_size(self) -> int:
+        if self.config.aaflow_plus_batch_size > 0:
+            return max(1, self.config.aaflow_plus_batch_size)
         workers = max(1, self.config.physical_workers or 1)
         return max(4, min(32, workers // 8 or 8))
+
     def _hits_table(self, hits: Sequence[RetrievalHit]):
         return self.pa.table(
             {
@@ -314,6 +436,7 @@ class AAFLOWPlusEngine(AAFLOWEngine):
                 "hybrid_score": [float(hit.hybrid_score) for hit in hits],
             }
         )
+
     def _memory_tables(self, memory_context: dict) -> dict:
         stm = memory_context.get("stm", [])
         ltm = memory_context.get("ltm", [])
@@ -330,6 +453,7 @@ class AAFLOWPlusEngine(AAFLOWEngine):
                 "summary": [item.get("summary", "") for item in em],
             }),
         }
+
     def _context_from_arrow(self, hits: Sequence[RetrievalHit], memory_context: dict) -> str:
         hits_table = self._hits_table(hits)
         base = []
@@ -348,78 +472,237 @@ class AAFLOWPlusEngine(AAFLOWEngine):
         for summary in tables["em"].column("summary").to_pylist():
             parts.append(f"EM: {summary}")
         return "\n\n".join(part for part in parts if part)
+
     def _post_answer(self, query: str, answer: str, query_embedding: np.ndarray, hits: Sequence[RetrievalHit]) -> float:
         return AAFLOWEngine._post_answer(self, query, answer, query_embedding, hits)
-    def run_queries(self, scenario: str, cases: Sequence[QueryCase]) -> List[QueryMetrics]:
-        if self.config.benchmark_mode != "fair_parallelism_plus_overlap":
-            return super().run_queries(scenario, cases)
-        if not (self.config.enable_stm or self.config.enable_ltm or self.config.enable_em):
-            return super().run_queries(scenario, cases)
-        rows: List[QueryMetrics] = []
-        batch_size = self._batch_size()
-        case_list = list(cases)
-        for start in range(0, len(case_list), batch_size):
-            batch = case_list[start : start + batch_size]
-            if not batch:
+
+    def _search(self, query: str, query_embedding: np.ndarray) -> List[RetrievalHit]:
+        candidate_limit = int(self.config.aaflow_plus_dense_candidates or 0)
+        if candidate_limit <= 0:
+            return self.hybrid.search(query, self.config.top_k, query_embedding)
+        return self._dense_first_hybrid_search(query, query_embedding, candidate_limit)
+
+    def _dense_first_hybrid_search(self, query: str, query_embedding: np.ndarray, candidate_limit: int) -> List[RetrievalHit]:
+        chunks = self.hybrid.chunks
+        if not chunks:
+            return []
+        limit = max(self.config.top_k, min(candidate_limit, len(chunks)))
+        dense = self.hybrid.dense
+        if hasattr(dense, "index"):
+            q = query_embedding.astype(np.float32).reshape(1, -1)
+            dense_scores_arr, dense_ids_arr = dense.index.search(q, limit)
+            dense_scores = {
+                int(idx): float(score)
+                for idx, score in zip(dense_ids_arr[0].tolist(), dense_scores_arr[0].tolist())
+                if idx >= 0
+            }
+            candidate_ids = list(dense_scores)
+        else:
+            sims = self.hybrid.chunk_embeddings @ query_embedding.astype(np.float32)
+            if limit < len(sims):
+                candidate_ids = np.argpartition(-sims, limit - 1)[:limit].tolist()
+            else:
+                candidate_ids = list(range(len(sims)))
+            dense_scores = {int(idx): float(sims[idx]) for idx in candidate_ids}
+
+        lexical = self.hybrid.lexical
+        lexical_scores = {int(idx): 0.0 for idx in candidate_ids}
+        for token in tokenize(query):
+            df = lexical.doc_freqs.get(token, 0)
+            if df == 0:
                 continue
-            query_embeddings = [self.embedder.embed_query(case.query) for case in batch]
-            cache_times = []
-            cache_hits = []
-            cached_answers = []
-            for case, query_embedding in zip(batch, query_embeddings):
-                with Timer() as cache_timer:
-                    cache_hit = False
-                    cached_answer = None
-                    if case.allow_cache:
-                        cache_hit, cached_answer, _ = self._lookup_cache(case.query, query_embedding)
-                cache_times.append(cache_timer.elapsed_ms)
-                cache_hits.append(cache_hit)
-                cached_answers.append(cached_answer or "")
-            miss_indices = [i for i, hit in enumerate(cache_hits) if not hit]
-            hits_by_index = {}
-            contexts_by_index = {}
-            tokens_by_index = {}
-            answers_by_index = {}
-            retrieval_avg_ms = 0.0
-            memory_load_avg_ms = 0.0
-            llm_avg_ms = 0.0
-            memory_store_avg_ms = 0.0
-            if miss_indices:
-                with Timer() as retrieval_timer:
-                    hit_futures = {
-                        idx: self.pool.submit(self.hybrid.search, batch[idx].query, self.config.top_k, query_embeddings[idx])
-                        for idx in miss_indices
-                    }
+            idf = math.log(1.0 + (lexical.num_docs - df + 0.5) / (df + 0.5))
+            for idx in candidate_ids:
+                freqs = lexical.term_freqs[idx]
+                tf = freqs.get(token, 0)
+                if tf == 0:
+                    continue
+                denom = tf + lexical.k1 * (1.0 - lexical.b + lexical.b * lexical.doc_lengths[idx] / lexical.avg_doc_len)
+                lexical_scores[int(idx)] += idf * (tf * (lexical.k1 + 1.0) / denom)
+
+        dense_max = max((abs(v) for v in dense_scores.values()), default=1.0)
+        lexical_max = max((abs(v) for v in lexical_scores.values()), default=1.0)
+        combined = []
+        for idx in candidate_ids:
+            dense_norm = dense_scores.get(int(idx), 0.0) / dense_max if dense_max else 0.0
+            lexical_norm = lexical_scores.get(int(idx), 0.0) / lexical_max if lexical_max else 0.0
+            hybrid = self.config.dense_weight * dense_norm + self.config.lexical_weight * lexical_norm
+            combined.append((int(idx), dense_scores.get(int(idx), 0.0), lexical_scores.get(int(idx), 0.0), hybrid))
+        combined.sort(key=lambda item: item[3], reverse=True)
+        hits: List[RetrievalHit] = []
+        for idx, dense_score, lexical_score, hybrid_score in combined[: self.config.top_k]:
+            chunk = chunks[idx]
+            hits.append(
+                RetrievalHit(
+                    chunk_id=chunk.chunk_id,
+                    text=chunk.text,
+                    metadata=chunk.metadata,
+                    dense_score=float(dense_score),
+                    lexical_score=float(lexical_score),
+                    hybrid_score=float(hybrid_score),
+                )
+            )
+        return hits
+
+    def _prepare_batch(self, batch: Sequence[QueryCase]) -> dict:
+        query_embeddings = [self.embedder.embed_query(case.query) for case in batch]
+        cache_times = []
+        cache_hits = []
+        cached_answers = []
+        for case, query_embedding in zip(batch, query_embeddings):
+            with Timer() as cache_timer:
+                cache_hit = False
+                cached_answer = None
+                if case.allow_cache:
+                    cache_hit, cached_answer, _ = self._lookup_cache(case.query, query_embedding)
+            cache_times.append(cache_timer.elapsed_ms)
+            cache_hits.append(cache_hit)
+            cached_answers.append(cached_answer or "")
+
+        miss_indices = [i for i, hit in enumerate(cache_hits) if not hit]
+        hits_by_index = {}
+        contexts_by_index = {}
+        total_memory_load_ms = 0.0
+        retrieval_avg_ms = 0.0
+        memory_load_avg_ms = 0.0
+        if miss_indices:
+            memory_enabled = self.config.enable_stm or self.config.enable_ltm or self.config.enable_em
+            with Timer() as retrieval_timer:
+                hit_futures = {
+                    idx: self.pool.submit(self._search, batch[idx].query, query_embeddings[idx])
+                    for idx in miss_indices
+                }
+                memory_futures = {}
+                if memory_enabled:
                     memory_futures = {
                         idx: self.pool.submit(self._load_memory_context_timed, query_embeddings[idx])
                         for idx in miss_indices
                     }
-                    total_memory_load_ms = 0.0
-                    for idx in miss_indices:
-                        hits = hit_futures[idx].result()
+                for idx in miss_indices:
+                    hits = hit_futures[idx].result()
+                    hits_by_index[idx] = hits
+                    if memory_enabled:
                         memory_context, memory_load_ms = memory_futures[idx].result()
-                        hits_by_index[idx] = hits
                         contexts_by_index[idx] = self._context_from_arrow(hits, memory_context)
                         total_memory_load_ms += memory_load_ms
-                retrieval_avg_ms = retrieval_timer.elapsed_ms / len(miss_indices)
-                memory_load_avg_ms = total_memory_load_ms / len(miss_indices)
+                    else:
+                        contexts_by_index[idx], _ = BaseBenchmarkEngine._build_context(
+                            self,
+                            batch[idx].query,
+                            hits,
+                            query_embeddings[idx],
+                        )
+            retrieval_avg_ms = retrieval_timer.elapsed_ms / len(miss_indices)
+            memory_load_avg_ms = total_memory_load_ms / len(miss_indices) if memory_enabled else 0.0
+
+        return {
+            "query_embeddings": query_embeddings,
+            "cache_times": cache_times,
+            "cache_hits": cache_hits,
+            "cached_answers": cached_answers,
+            "miss_indices": miss_indices,
+            "hits_by_index": hits_by_index,
+            "contexts_by_index": contexts_by_index,
+            "retrieval_avg_ms": retrieval_avg_ms,
+            "memory_load_avg_ms": memory_load_avg_ms,
+        }
+
+    def run_queries(self, scenario: str, cases: Sequence[QueryCase]) -> List[QueryMetrics]:
+        if self.config.benchmark_mode != "fair_parallelism_plus_overlap":
+            return super().run_queries(scenario, cases)
+        if scenario == "retrieval_hybrid":
+            rows: List[QueryMetrics] = []
+            for case in cases:
+                with Timer() as total_timer:
+                    query_embedding = self.embedder.embed_query(case.query)
+                    with Timer() as cache_timer:
+                        cache_hit = False
+                        cached_answer = None
+                        if case.allow_cache:
+                            cache_hit, cached_answer, _ = self._lookup_cache(case.query, query_embedding)
+                    retrieval_ms = 0.0
+                    answer = cached_answer or ""
+                    if not cache_hit:
+                        with Timer() as retrieval_timer:
+                            hits = self._search(case.query, query_embedding)
+                            context, _ = BaseBenchmarkEngine._build_context(self, case.query, hits, query_embedding)
+                        retrieval_ms = retrieval_timer.elapsed_ms
+                        answer = context[:240]
+                rows.append(
+                    QueryMetrics(
+                        engine=self.name,
+                        scenario=scenario,
+                        query_id=case.query_id,
+                        cache_hit=cache_hit,
+                        semantic_cache_lookup_ms=cache_timer.elapsed_ms,
+                        retrieval_ms=retrieval_ms,
+                        memory_load_ms=0.0,
+                        memory_store_ms=0.0,
+                        llm_generation_ms=0.0,
+                        total_ms=total_timer.elapsed_ms,
+                        tokens_generated=0,
+                        answer_preview=answer[:120].replace("\n", " "),
+                        hit_ids=[hit.chunk_id for hit in hits] if not cache_hit else [],
+                    )
+                )
+            return rows
+
+        rows: List[QueryMetrics] = []
+        batch_size = self._batch_size()
+        batches = [list(cases)[start : start + batch_size] for start in range(0, len(cases), batch_size)]
+        if not batches:
+            return rows
+
+        prepare_future = self.pool.submit(self._prepare_batch, batches[0])
+        for batch_index, batch in enumerate(batches):
+            with Timer() as wait_timer:
+                prepared = prepare_future.result()
+            next_future = None
+            if batch_index + 1 < len(batches):
+                # AAFLOW+ pipelines CPU retrieval/context preparation for the next batch
+                # under the current batch's GPU generation.
+                next_future = self.pool.submit(self._prepare_batch, batches[batch_index + 1])
+
+            query_embeddings = prepared["query_embeddings"]
+            cache_times = prepared["cache_times"]
+            cache_hits = prepared["cache_hits"]
+            cached_answers = prepared["cached_answers"]
+            miss_indices = prepared["miss_indices"]
+            hits_by_index = prepared["hits_by_index"]
+            contexts_by_index = prepared["contexts_by_index"]
+            retrieval_avg_ms = prepared["retrieval_avg_ms"]
+            memory_load_avg_ms = prepared["memory_load_avg_ms"]
+            retrieval_wait_avg_ms = wait_timer.elapsed_ms / len(miss_indices) if miss_indices else 0.0
+
+            answers_by_index = {}
+            tokens_by_index = {}
+            llm_avg_ms = 0.0
+            memory_store_avg_ms = 0.0
+            if miss_indices:
                 if scenario != "retrieval_hybrid":
                     with Timer() as generation_timer:
-                        gen_futures = {
-                            idx: self.pool.submit(self.llm.generate, batch[idx].query, contexts_by_index[idx])
-                            for idx in miss_indices
-                        }
-                        total_tokens = 0
-                        for idx in miss_indices:
-                            answer, tokens_generated = gen_futures[idx].result()
-                            answers_by_index[idx] = answer
-                            tokens_by_index[idx] = tokens_generated
-                            total_tokens += tokens_generated
+                        if hasattr(self.llm, "generate_batch"):
+                            generated_rows = self.llm.generate_batch(
+                                [(batch[idx].query, contexts_by_index[idx]) for idx in miss_indices]
+                            )
+                            for idx, (answer, tokens_generated) in zip(miss_indices, generated_rows):
+                                answers_by_index[idx] = answer
+                                tokens_by_index[idx] = tokens_generated
+                        else:
+                            gen_futures = {
+                                idx: self.pool.submit(self.llm.generate, batch[idx].query, contexts_by_index[idx])
+                                for idx in miss_indices
+                            }
+                            for idx in miss_indices:
+                                answer, tokens_generated = gen_futures[idx].result()
+                                answers_by_index[idx] = answer
+                                tokens_by_index[idx] = tokens_generated
                     llm_avg_ms = generation_timer.elapsed_ms / len(miss_indices)
                 else:
                     for idx in miss_indices:
                         answers_by_index[idx] = contexts_by_index[idx][:240]
                         tokens_by_index[idx] = 0
+
                 with Timer() as store_timer:
                     for idx in miss_indices:
                         query = batch[idx].query
@@ -433,31 +716,37 @@ class AAFLOWPlusEngine(AAFLOWEngine):
                             hits_by_index[idx],
                         )
                 memory_store_avg_ms = memory_store_avg_ms / len(miss_indices)
-            batch_total_avg_ms = 0.0
-            if batch:
-                # throughput-oriented attribution: amortize batch wall time over the batch size
-                batch_total_avg_ms = sum(cache_times) / len(batch)
-                if miss_indices:
-                    batch_total_avg_ms += retrieval_avg_ms + llm_avg_ms + memory_store_avg_ms
-            for i, case in enumerate(batch):
-                cache_hit = cache_hits[i]
-                answer = cached_answers[i] if cache_hit else answers_by_index.get(i, "")
+
+            cache_avg_ms = sum(cache_times) / len(batch) if batch else 0.0
+            batch_total_avg_ms = cache_avg_ms
+            if miss_indices:
+                # Total is critical-path time. The full retrieval stage is still reported
+                # separately, but only non-overlapped retrieval wait contributes here.
+                batch_total_avg_ms += retrieval_wait_avg_ms + llm_avg_ms + memory_store_avg_ms
+                if scenario == "retrieval_hybrid":
+                    batch_total_avg_ms = cache_avg_ms + retrieval_avg_ms + memory_store_avg_ms
+
+            for idx, case in enumerate(batch):
+                cache_hit = cache_hits[idx]
+                answer = cached_answers[idx] if cache_hit else answers_by_index.get(idx, "")
                 rows.append(
                     QueryMetrics(
                         engine=self.name,
                         scenario=scenario,
                         query_id=case.query_id,
                         cache_hit=cache_hit,
-                        semantic_cache_lookup_ms=cache_times[i],
+                        semantic_cache_lookup_ms=cache_times[idx],
                         retrieval_ms=0.0 if cache_hit else retrieval_avg_ms,
                         memory_load_ms=0.0 if cache_hit else memory_load_avg_ms,
                         memory_store_ms=0.0 if cache_hit else memory_store_avg_ms,
                         llm_generation_ms=0.0 if cache_hit or scenario == "retrieval_hybrid" else llm_avg_ms,
-                        total_ms=cache_times[i] if cache_hit else batch_total_avg_ms,
-                        tokens_generated=0 if cache_hit else tokens_by_index.get(i, 0),
+                        total_ms=cache_times[idx] if cache_hit else batch_total_avg_ms,
+                        tokens_generated=0 if cache_hit else tokens_by_index.get(idx, 0),
                         answer_preview=answer[:120].replace("\n", " "),
+                        hit_ids=[hit.chunk_id for hit in hits_by_index.get(idx, [])] if not cache_hit else [],
                     )
                 )
+            prepare_future = next_future if next_future is not None else prepare_future
         return rows
 def build_llm(
     backend: str,

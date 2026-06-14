@@ -1,0 +1,4 @@
+repeat_index,scenario,count,topk_recall_avg,topk_jaccard_avg,overlap_count_avg,baseline_k_avg,candidate_k_avg
+0,llm_generation,512,0.837109375,0.7650514632936508,4.185546875,5,5
+0,non_cached_complex_query,512,0.76796875,0.6777886284722222,3.83984375,5,5
+0,retrieval_hybrid,512,0.83203125,0.7655707465277778,4.16015625,5,5

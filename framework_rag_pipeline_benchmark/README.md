@@ -334,3 +334,140 @@ Interpretation:
 - distributed Chroma and FAISS runs isolate each rank’s vector store path; they do not share one persistent store across ranks.
 - the distributed benchmark aggregates max stage time across ranks.
 - the single-process CLI supports `--framework-filter` and `--repeat`; the distributed Slurm path is intended for full benchmark runs.
+
+## GPU HuggingFace Framework Benchmark
+
+This directory also contains a GPU-based HuggingFace framework benchmark that mirrors the GPU RAG pipeline benchmark in `benchmark/`, but reports framework-level results for:
+
+- `LangChain`
+- `LangGraph`
+- `CrewAI`
+- `AutoGen`
+- `AAFLOW`
+
+The GPU benchmark uses real HuggingFace causal language models for both embedding and generation. Embeddings are produced by mean-pooling the model hidden states and normalizing the resulting vectors. FAISS `IndexFlatIP` is used as the local vector sink. The benchmark is designed to compare pipeline orchestration and execution strategy while keeping the model, corpus, generation settings, and baseline stage behavior fixed.
+
+Important files:
+
+- `distributed_hf_framework_benchmark.py`: distributed one-process-per-GPU benchmark entrypoint
+- `run_hf_framework_benchmark.sbatch`: Slurm launcher for Llama3-8B and Mistral-7B GPU framework runs
+- `slurm_runs_hf_framework/<job_id>/<model>_2gpu/benchmark.out`: tabular benchmark output
+- `slurm_runs_hf_framework/<job_id>/<model>_2gpu/summary.csv`: machine-readable summary
+- `slurm_runs_hf_framework/<job_id>/<model>_2gpu/summary.json`: JSON summary
+
+### GPU Benchmark Design
+
+Each Slurm rank owns one GPU and one corpus shard. For the final 2-GPU runs, each rank processes `16000` chunks, for `32000` total chunks. The same rank-local corpus is reused by all frameworks in a given run.
+
+Measured stages:
+
+- `Load(s)`: read rank-local text files
+- `Transform(s)`: split documents into chunks
+- `Embed(s)`: tokenize chunks, run the HF model hidden-state embedding path, mean-pool, normalize, and transfer vectors as needed
+- `Upsert(s)`: insert vectors into FAISS
+- `Generate(s)`: run batched text generation over sampled prompts
+- `Total(s)`: end-to-end stage time excluding model load and AAFLOW compile setup
+
+AAFLOW uses the final selected GPU optimization path:
+
+- fixed semantic workload; no pre-embedded data
+- `AAFLOW_EMBED_BATCH_SIZE=128`
+- CPU tokenizer prefetch for AAFLOW embedding batches
+- compiled AAFLOW embedding graph with default Torch compile options and CUDA graph support
+- FlashAttention 2 enabled for model execution
+- no TF32 forcing
+- no deferred vector transfer in the final setting
+- no token-budget batching in the final setting
+
+The compile/setup cost is reported separately as `Setup(s)` and is not included in `Total(s)`. This keeps the measured total focused on steady-state pipeline execution.
+
+### GPU Environment
+
+Validated Python environment with FlashAttention:
+
+```bash
+module load gcc/14.2.0 cuda/13.0.2
+/scratch/djy8hg/env/drc_rag_benchmarks_flashattn/bin/python -c "import flash_attn; print(flash_attn.__version__)"
+```
+
+Validated version:
+
+```text
+2.8.3.post1
+```
+
+Required runtime locations used in the final run:
+
+```bash
+PROJECT_ROOT=/scratch/djy8hg/workdir/AAFLOW
+PYTHON_BIN=/scratch/djy8hg/env/drc_rag_benchmarks_flashattn/bin/python
+HF_HOME=/scratch/djy8hg/huggingface
+CORPUS_ROOT=/scratch/djy8hg/aaflow_data/hf_wikitext103_2gpu_16000x900
+```
+
+The final corpus contains `2` rank shards, `16000` chunks per rank, `64` files per rank, and `900` characters per chunk.
+
+### Final GPU Slurm Command
+
+Run Llama3-8B:
+
+```bash
+cd /scratch/djy8hg/workdir/AAFLOW
+COMMON="GPUS=2,CHUNKS_PER_GPU=16000,FILES_PER_GPU=64,CHUNK_CHARS=900,GENERATION_SAMPLES_PER_GPU=64,EMBED_BATCH_SIZE=64,GENERATION_BATCH_SIZE=16,AAFLOW_EMBED_BATCH_SIZE=128,AAFLOW_TOKENIZER_PREFETCH=1,AAFLOW_DEFER_VECTOR_TRANSFER=0,AAFLOW_TF32=0,AAFLOW_COMPILE_MODE=default,AAFLOW_TOKEN_BUDGET=0,MAX_INPUT_TOKENS=128,MAX_NEW_TOKENS=32,CORPUS_ROOT=/scratch/djy8hg/aaflow_data/hf_wikitext103_2gpu_16000x900,ATTN_IMPLEMENTATION=flash_attention_2,DTYPE=bfloat16"
+sbatch --nodes=1 --ntasks=2 --cpus-per-task=8 --gres=gpu:a100:2 \
+  --export=ALL,$COMMON,MODEL=llama3-8b \
+  framework_rag_pipeline_benchmark/run_hf_framework_benchmark.sbatch
+```
+
+Run Mistral-7B:
+
+```bash
+cd /scratch/djy8hg/workdir/AAFLOW
+COMMON="GPUS=2,CHUNKS_PER_GPU=16000,FILES_PER_GPU=64,CHUNK_CHARS=900,GENERATION_SAMPLES_PER_GPU=64,EMBED_BATCH_SIZE=64,GENERATION_BATCH_SIZE=16,AAFLOW_EMBED_BATCH_SIZE=128,AAFLOW_TOKENIZER_PREFETCH=1,AAFLOW_DEFER_VECTOR_TRANSFER=0,AAFLOW_TF32=0,AAFLOW_COMPILE_MODE=default,AAFLOW_TOKEN_BUDGET=0,MAX_INPUT_TOKENS=128,MAX_NEW_TOKENS=32,CORPUS_ROOT=/scratch/djy8hg/aaflow_data/hf_wikitext103_2gpu_16000x900,ATTN_IMPLEMENTATION=flash_attention_2,DTYPE=bfloat16"
+sbatch --nodes=1 --ntasks=2 --cpus-per-task=8 --gres=gpu:a100:2 \
+  --export=ALL,$COMMON,MODEL=mistral-7b \
+  framework_rag_pipeline_benchmark/run_hf_framework_benchmark.sbatch
+```
+
+The launcher requests the dedicated A100 partition and reservation:
+
+```bash
+#SBATCH --partition=bii-gpu
+#SBATCH --reservation=bi_fox_dgx
+```
+
+### Final GPU Results
+
+Final validated runs:
+
+- Llama3-8B: job `15245798`
+- Mistral-7B: job `15245799`
+
+Llama3-8B, 2xA100, 32000 chunks:
+
+| Framework | Embed(s) | Upsert(s) | Generate(s) | Total(s) | Chunks/s |
+|---|---:|---:|---:|---:|---:|
+| LangChain | 152.123 | 0.097 | 4.263 | 156.477 | 204.50 |
+| LangGraph | 151.983 | 0.099 | 4.243 | 156.320 | 204.71 |
+| CrewAI | 152.203 | 0.099 | 4.244 | 156.546 | 204.41 |
+| AutoGen | 152.077 | 0.098 | 4.239 | 156.419 | 204.58 |
+| AAFLOW | 124.306 | 0.540 | 4.237 | 128.543 | 248.94 |
+
+AAFLOW is `17.77%` faster than the best Llama3-8B baseline, `LangGraph`.
+
+Mistral-7B, 2xA100, 32000 chunks:
+
+| Framework | Embed(s) | Upsert(s) | Generate(s) | Total(s) | Chunks/s |
+|---|---:|---:|---:|---:|---:|
+| LangChain | 151.140 | 0.113 | 4.112 | 155.425 | 205.89 |
+| LangGraph | 151.037 | 0.098 | 4.103 | 155.282 | 206.08 |
+| CrewAI | 151.373 | 0.099 | 4.104 | 155.614 | 205.64 |
+| AutoGen | 151.239 | 0.101 | 4.101 | 155.489 | 205.80 |
+| AAFLOW | 123.997 | 0.329 | 4.097 | 128.136 | 249.73 |
+
+AAFLOW is `17.48%` faster than the best Mistral-7B baseline, `LangGraph`.
+
+### Optimization Ablations
+
+
+The dominant gain comes from reducing AAFLOW embedding time while keeping the same semantic workload and generation settings as the other frameworks.

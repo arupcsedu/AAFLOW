@@ -1,0 +1,19 @@
+AAFLOW+      llm_generation           count=1024 cache_hit_rate=0.00 total_ms_avg=96.23 retrieval_ms_avg=1.58 memory_load_ms_avg=0.00 memory_store_ms_avg=0.02 llm_ms_avg=96.16
+AAFLOW+      non_cached_complex_query count=1024 cache_hit_rate=0.00 total_ms_avg=96.42 retrieval_ms_avg=1.95 memory_load_ms_avg=0.00 memory_store_ms_avg=0.01 llm_ms_avg=96.35
+AAFLOW+      retrieval_hybrid         count=1024 cache_hit_rate=0.00 total_ms_avg=1.51 retrieval_ms_avg=1.47 memory_load_ms_avg=0.00 memory_store_ms_avg=0.00 llm_ms_avg=0.00
+HigressRAG   llm_generation           count=1024 cache_hit_rate=0.00 total_ms_avg=217.55 retrieval_ms_avg=63.85 memory_load_ms_avg=0.00 memory_store_ms_avg=0.00 llm_ms_avg=153.70
+HigressRAG   non_cached_complex_query count=1024 cache_hit_rate=0.00 total_ms_avg=247.51 retrieval_ms_avg=94.60 memory_load_ms_avg=0.00 memory_store_ms_avg=0.00 llm_ms_avg=152.91
+HigressRAG   retrieval_hybrid         count=1024 cache_hit_rate=0.00 total_ms_avg=68.68 retrieval_ms_avg=68.68 memory_load_ms_avg=0.00 memory_store_ms_avg=0.00 llm_ms_avg=0.00
+retrieval_quality llm_generation           count= 512 topk_recall=0.837 jaccard=0.765 overlap=4.19
+retrieval_quality non_cached_complex_query count= 512 topk_recall=0.768 jaccard=0.678 overlap=3.84
+retrieval_quality retrieval_hybrid         count= 512 topk_recall=0.832 jaccard=0.766 overlap=4.16
+
+Comparison Table
+Scenario                 HigressRAG ms  AAFLOW+ ms  Improvement  Top-k Recall  Jaccard  Avg Overlap
+-----------------------  ------------  ----------  -----------  ------------  -------  -----------
+retrieval_hybrid                68.68        1.51       97.80%         0.832    0.766  4.16 / 5
+llm_generation                 217.55       96.23       55.77%         0.837    0.765  4.19 / 5
+non_cached_complex_query        247.51       96.42       61.04%         0.768    0.678  3.84 / 5
+Wrote /scratch/djy8hg/workdir/AAFLOW/higress_agentic_benchmark/slurm_runs_hf_higress_query/15535596/llama3-8b_2gpu/summary.csv
+Wrote /scratch/djy8hg/workdir/AAFLOW/higress_agentic_benchmark/slurm_runs_hf_higress_query/15535596/llama3-8b_2gpu/full_summary.csv
+Wrote /scratch/djy8hg/workdir/AAFLOW/higress_agentic_benchmark/slurm_runs_hf_higress_query/15535596/llama3-8b_2gpu/retrieval_quality.csv
