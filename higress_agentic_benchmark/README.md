@@ -205,3 +205,123 @@ Previous validated run kept for reference:
 - These results are valid for the current overlap-oriented FAISS benchmark profile.
 - They should not be presented as a neutral backend-only comparison.
 - If you want a neutral Higress vs Agentic comparison, use a different benchmark profile without modeled non-Agentic dispatch overhead.
+
+## GPU HigressRAG vs AAFLOW+ Benchmark
+
+This directory also includes a GPU-backed Higress-style query benchmark using local HuggingFace Llama3-8B and Mistral-7B models. The GPU benchmark preserves the historical Higress scenarios but replaces mock LLM latency with real model generation on A100 GPUs.
+
+Main files:
+
+- `distributed_hf_higress_query_benchmark.py`: distributed GPU query benchmark.
+- `run_hf_higress_query_benchmark.sbatch`: Slurm launcher for the GPU query benchmark.
+- `gpu_higress_benchmark.tex`: detailed report with AAFLOW+ design, algorithm, results, and discussion.
+
+### GPU AAFLOW+ Design
+
+The final GPU AAFLOW+ path uses four optimizations:
+
+- Dense-first hybrid retrieval: FAISS dense search selects top-N candidates, then BM25 lexical scoring runs only over those candidates.
+- Lexical reranking: dense and lexical scores are normalized and combined with the same hybrid weighting policy.
+- Larger generation microbatches: `AAFLOW_PLUS_BATCH_SIZE=16` improves GPU generation throughput.
+- CPU/GPU overlap: AAFLOW+ prepares retrieval/context for the next batch while the current batch runs GPU generation.
+
+Final retrieval configuration:
+
+```bash
+AAFLOW_PLUS_DENSE_CANDIDATES=128
+TOP_K=5
+```
+
+This is an optimized retrieval policy, not an identical retrieval algorithm. To keep the comparison rigorous, the benchmark records top-k overlap and recall of AAFLOW+ results against HigressRAG's full hybrid retrieval results.
+
+### GPU Metrics
+
+In addition to the original latency metrics, GPU runs now write retrieval quality metrics:
+
+- `summary.csv`: aggregate latency metrics.
+- `full_summary.csv`: per-repeat aggregate latency metrics.
+- `query_metrics.csv`: per-query metrics, including retrieved `hit_ids`.
+- `retrieval_quality.csv`: AAFLOW+ top-k recall/Jaccard/overlap against HigressRAG.
+- `summary.json`: JSON summary, retrieval quality, and query rows.
+
+`retrieval_quality.csv` fields:
+
+- `topk_recall_avg`: fraction of HigressRAG top-k chunks recovered by AAFLOW+.
+- `topk_jaccard_avg`: Jaccard similarity between HigressRAG and AAFLOW+ top-k sets.
+- `overlap_count_avg`: average number of overlapping chunks in top-k.
+
+### GPU Environment
+
+Validated environment:
+
+```bash
+module load gcc/14.2.0 cuda/13.0.2
+PYTHON_BIN=/scratch/djy8hg/env/drc_rag_benchmarks_flashattn/bin/python
+HF_HOME=/scratch/djy8hg/huggingface
+```
+
+Validated model backend settings:
+
+```bash
+ATTN_IMPLEMENTATION=flash_attention_2
+DTYPE=bfloat16
+MAX_INPUT_TOKENS=512
+MAX_NEW_TOKENS=32
+```
+
+### Final GPU Run Command
+
+The final larger validation run uses 512 queries per rank, 2 ranks, and therefore 1024 total queries per scenario.
+
+```bash
+cd /scratch/djy8hg/workdir/AAFLOW
+DATA_DIR=/scratch/djy8hg/aaflow_data/hf_wikitext103_2gpu_16000x900/rank_0000
+COMMON="GPUS=2,DATA_DIR=$DATA_DIR,QUERY_COUNT=512,REPEAT=1,FILE_GLOB=*.txt,MAX_CHARS=900,OVERLAP_CHARS=120,MAX_INPUT_TOKENS=512,MAX_NEW_TOKENS=32,ATTN_IMPLEMENTATION=flash_attention_2,DTYPE=bfloat16,NON_AGENTIC_DISPATCH_OVERHEAD_MS=0,DISABLE_STM=1,DISABLE_LTM=1,DISABLE_EM=1,AAFLOW_PLUS_BATCH_SIZE=16,AAFLOW_PLUS_DENSE_CANDIDATES=128,SCENARIO_FILTER=retrieval_hybrid:llm_generation"
+
+sbatch --nodes=1 --ntasks=2 --cpus-per-task=8 --gres=gpu:a100:2 \
+  --export=ALL,$COMMON,MODEL=llama3-8b \
+  higress_agentic_benchmark/run_hf_higress_query_benchmark.sbatch
+
+sbatch --nodes=1 --ntasks=2 --cpus-per-task=8 --gres=gpu:a100:2 \
+  --export=ALL,$COMMON,MODEL=mistral-7b \
+  higress_agentic_benchmark/run_hf_higress_query_benchmark.sbatch
+```
+
+Use colon-separated scenario filters, not commas, because Slurm `--export` splits comma-separated values.
+
+### Final GPU Results
+
+Final larger validation jobs:
+
+- Llama3-8B: job `15456005`
+- Mistral-7B: job `15456006`
+
+Llama3-8B, job `15456005`, 1024 total queries per scenario:
+
+| Scenario | HigressRAG ms | AAFLOW+ ms | AAFLOW+ Improvement | Top-k Recall | Jaccard | Avg Overlap |
+|---|---:|---:|---:|---:|---:|---:|
+| `retrieval_hybrid` | `67.07` | `1.50` | `97.76%` | `0.869` | `0.806` | `4.34 / 5` |
+| `llm_generation` | `214.90` | `96.37` | `55.16%` | `0.915` | `0.872` | `4.58 / 5` |
+
+Mistral-7B, job `15456006`, 1024 total queries per scenario:
+
+| Scenario | HigressRAG ms | AAFLOW+ ms | AAFLOW+ Improvement | Top-k Recall | Jaccard | Avg Overlap |
+|---|---:|---:|---:|---:|---:|---:|
+| `retrieval_hybrid` | `75.98` | `1.66` | `97.81%` | `0.886` | `0.831` | `4.43 / 5` |
+| `llm_generation` | `216.57` | `95.25` | `56.02%` | `0.923` | `0.883` | `4.62 / 5` |
+
+### Interpretation
+
+AAFLOW+ works better because it changes the physical execution policy while preserving the logical RAG stages.
+
+- Retrieval is faster because AAFLOW+ avoids full-corpus BM25 scoring. It runs BM25 only over dense top-128 candidates.
+- Generation is faster because AAFLOW+ uses larger GPU microbatches and overlaps CPU retrieval/context preparation with GPU generation.
+- Quality remains measurable because AAFLOW+ reports top-k recall and overlap against HigressRAG's full hybrid retrieval.
+
+The final result should be reported as an optimized retrieval-policy comparison:
+
+```text
+AAFLOW+ uses dense-first candidate pruning plus lexical reranking. It achieves 55-98% lower latency while preserving about 87-92% top-5 recall relative to HigressRAG full hybrid retrieval.
+```
+
+If exact full-hybrid retrieval equivalence is required, increase `AAFLOW_PLUS_DENSE_CANDIDATES`, for example to `256`, and rerun to trade some latency for higher top-k recall.
