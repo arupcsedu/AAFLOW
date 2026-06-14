@@ -419,6 +419,31 @@ def main() -> int:
                 f"jaccard={float(row['topk_jaccard_avg']):.3f} "
                 f"overlap={float(row['overlap_count_avg']):.2f}"
             )
+
+        summary_by_key = {(row.engine, row.scenario): row for row in median_rows}
+        quality_by_scenario = {str(row["scenario"]): row for row in quality_rows}
+        comparable_scenarios = [
+            scenario for scenario in ("retrieval_hybrid", "llm_generation", "non_cached_complex_query")
+            if ("HigressRAG", scenario) in summary_by_key and ("AAFLOW+", scenario) in summary_by_key
+        ]
+        if comparable_scenarios:
+            print("")
+            print("Comparison Table")
+            print("Scenario                 HigressRAG ms  AAFLOW+ ms  Improvement  Top-k Recall  Jaccard  Avg Overlap")
+            print("-----------------------  ------------  ----------  -----------  ------------  -------  -----------")
+            for scenario in comparable_scenarios:
+                higress = summary_by_key[("HigressRAG", scenario)]
+                aaflow = summary_by_key[("AAFLOW+", scenario)]
+                improvement = (higress.total_ms_avg - aaflow.total_ms_avg) / higress.total_ms_avg * 100.0 if higress.total_ms_avg else 0.0
+                quality = quality_by_scenario.get(scenario, {})
+                recall = float(quality.get("topk_recall_avg", 0.0))
+                jaccard = float(quality.get("topk_jaccard_avg", 0.0))
+                overlap = float(quality.get("overlap_count_avg", 0.0))
+                baseline_k = float(quality.get("baseline_k_avg", 0.0))
+                print(
+                    f"{scenario:23s}  {higress.total_ms_avg:12.2f}  {aaflow.total_ms_avg:10.2f}  "
+                    f"{improvement:10.2f}%  {recall:12.3f}  {jaccard:7.3f}  {overlap:.2f} / {baseline_k:.0f}"
+                )
         print(f"Wrote {output_dir / 'summary.csv'}")
         print(f"Wrote {output_dir / 'full_summary.csv'}")
         print(f"Wrote {output_dir / 'retrieval_quality.csv'}")

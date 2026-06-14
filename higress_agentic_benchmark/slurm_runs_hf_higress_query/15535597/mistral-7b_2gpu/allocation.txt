@@ -1,0 +1,10 @@
+job_id=15535597
+model=mistral-7b
+model_id=mistralai/Mistral-7B-Instruct-v0.3
+world_size=2
+query_count=512
+repeat=1
+data_dir=/scratch/djy8hg/aaflow_data/hf_wikitext103_2gpu_16000x900/rank_0000
+attn_implementation=flash_attention_2
+aaflow_plus_batch_size=16
+aaflow_plus_dense_candidates=128
