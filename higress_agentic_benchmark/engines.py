@@ -41,6 +41,7 @@ class EngineConfig:
     memory_top_k_em: int = 2
     aaflow_plus_batch_size: int = 0
     aaflow_plus_dense_candidates: int = 0
+    aaflow_plus_exact_vectorized: bool = True
 class BaseBenchmarkEngine:
     def __init__(self, name: str, chunks: Sequence[CorpusChunk], llm, config: EngineConfig):
         self.name = name
@@ -420,6 +421,7 @@ class AAFLOWPlusEngine(AAFLOWEngine):
         import pyarrow as pa
         self.pa = pa
         self.name = "AAFLOW+"
+        self._bm25_postings_cache = None
 
     def _batch_size(self) -> int:
         if self.config.aaflow_plus_batch_size > 0:
@@ -479,8 +481,73 @@ class AAFLOWPlusEngine(AAFLOWEngine):
     def _search(self, query: str, query_embedding: np.ndarray) -> List[RetrievalHit]:
         candidate_limit = int(self.config.aaflow_plus_dense_candidates or 0)
         if candidate_limit <= 0:
+            if self.config.aaflow_plus_exact_vectorized:
+                return self._exact_vectorized_hybrid_search(query, query_embedding)
             return self.hybrid.search(query, self.config.top_k, query_embedding)
         return self._dense_first_hybrid_search(query, query_embedding, candidate_limit)
+
+    def _bm25_postings(self):
+        if self._bm25_postings_cache is not None:
+            return self._bm25_postings_cache
+        lexical = self.hybrid.lexical
+        postings = {}
+        for idx, freqs in enumerate(lexical.term_freqs):
+            for token, tf in freqs.items():
+                postings.setdefault(token, []).append((idx, tf))
+        self._bm25_postings_cache = postings
+        return postings
+
+    def _exact_vectorized_hybrid_search(self, query: str, query_embedding: np.ndarray) -> List[RetrievalHit]:
+        chunks = self.hybrid.chunks
+        if not chunks:
+            return []
+        embeddings = self.hybrid.chunk_embeddings
+        dense_scores = embeddings @ query_embedding.astype(np.float32)
+        lexical_scores = np.zeros(len(chunks), dtype=np.float32)
+        lexical = self.hybrid.lexical
+        postings = self._bm25_postings()
+        for token in tokenize(query):
+            token_postings = postings.get(token)
+            if not token_postings:
+                continue
+            df = lexical.doc_freqs.get(token, 0)
+            idf = math.log(1.0 + (lexical.num_docs - df + 0.5) / (df + 0.5))
+            for idx, tf in token_postings:
+                denom = tf + lexical.k1 * (1.0 - lexical.b + lexical.b * lexical.doc_lengths[idx] / lexical.avg_doc_len)
+                lexical_scores[idx] += idf * (tf * (lexical.k1 + 1.0) / denom)
+
+        dense_max = float(np.max(np.abs(dense_scores))) if dense_scores.size else 1.0
+        lexical_max = float(np.max(np.abs(lexical_scores))) if lexical_scores.size else 1.0
+        if dense_max == 0.0:
+            dense_max = 1.0
+        if lexical_max == 0.0:
+            lexical_max = 1.0
+        hybrid_scores = (
+            self.config.dense_weight * (dense_scores / dense_max)
+            + self.config.lexical_weight * (lexical_scores / lexical_max)
+        )
+        top_k = min(self.config.top_k, len(chunks))
+        if top_k <= 0:
+            return []
+        if top_k < len(chunks):
+            top_idx = np.argpartition(-hybrid_scores, top_k - 1)[:top_k]
+            top_idx = top_idx[np.argsort(-hybrid_scores[top_idx], kind="stable")]
+        else:
+            top_idx = np.argsort(-hybrid_scores, kind="stable")
+        hits: List[RetrievalHit] = []
+        for idx in top_idx.tolist():
+            chunk = chunks[int(idx)]
+            hits.append(
+                RetrievalHit(
+                    chunk_id=chunk.chunk_id,
+                    text=chunk.text,
+                    metadata=chunk.metadata,
+                    dense_score=float(dense_scores[int(idx)]),
+                    lexical_score=float(lexical_scores[int(idx)]),
+                    hybrid_score=float(hybrid_scores[int(idx)]),
+                )
+            )
+        return hits
 
     def _dense_first_hybrid_search(self, query: str, query_embedding: np.ndarray, candidate_limit: int) -> List[RetrievalHit]:
         chunks = self.hybrid.chunks
