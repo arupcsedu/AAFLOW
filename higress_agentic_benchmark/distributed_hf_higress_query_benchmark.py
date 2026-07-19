@@ -265,6 +265,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--physical-workers", type=int, default=2)
     p.add_argument("--aaflow-plus-batch-size", type=int, default=0)
     p.add_argument("--aaflow-plus-dense-candidates", type=int, default=0)
+    p.add_argument("--disable-aaflow-plus-exact-vectorized", action="store_true")
     p.add_argument("--non-agentic-dispatch-overhead-ms", type=float, default=0.0)
     p.add_argument("--semantic-cache-threshold", type=float, default=0.92)
     p.add_argument("--dense-weight", type=float, default=0.65)
@@ -305,6 +306,7 @@ def main() -> int:
                 f"attn_implementation={args.attn_implementation}",
                 f"aaflow_plus_batch_size={args.aaflow_plus_batch_size}",
                 f"aaflow_plus_dense_candidates={args.aaflow_plus_dense_candidates}",
+                f"aaflow_plus_exact_vectorized={not args.disable_aaflow_plus_exact_vectorized}",
             ]) + "\n",
             encoding="utf-8",
         )
@@ -320,6 +322,7 @@ def main() -> int:
         physical_workers=args.physical_workers,
         aaflow_plus_batch_size=args.aaflow_plus_batch_size,
         aaflow_plus_dense_candidates=args.aaflow_plus_dense_candidates,
+        aaflow_plus_exact_vectorized=not args.disable_aaflow_plus_exact_vectorized,
         vector_backend=args.vector_backend,
         non_agentic_dispatch_overhead_ms=args.non_agentic_dispatch_overhead_ms,
         top_k=args.top_k,
